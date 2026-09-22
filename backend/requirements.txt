@@ -1,0 +1,7 @@
+fastapi==0.115.*
+uvicorn[standard]==0.34.*
+pydantic[email]==2.*
+psycopg[binary]==3.*
+httpx==0.28.*
+PyJWT==2.*
+git+ssh://git@github.com/aacode7/subscription-engine.git

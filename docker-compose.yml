@@ -1,0 +1,49 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      ssh:
+        - default
+    env_file:
+      - ./backend/.env
+    environment:
+      SUBSCRIPTION_PACKAGE_ID: ${SUBSCRIPTION_PACKAGE_ID:-onboarding-free-trial}
+    network_mode: host
+
+  subscription-worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      ssh:
+        - default
+    env_file:
+      - ./backend/.env
+    environment:
+      SUBSCRIPTION_PACKAGE_ID: ${SUBSCRIPTION_PACKAGE_ID:-onboarding-free-trial}
+    network_mode: host
+    command: ["/venv/bin/python", "-m", "backend.worker"]
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: shell
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "3001:80"
+  dashboard:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: remote
+    ports:
+      - "5001:80"
+  customers:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: customers
+    ports:
+      - "5002:80"

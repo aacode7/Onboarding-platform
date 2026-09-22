@@ -1,0 +1,20 @@
+{
+  "name": "onboarding-platform",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm --workspace apps/shell run dev",
+    "build": "npm --workspace apps/dashboard run build && npm --workspace apps/customers run build && npm --workspace apps/shell run build",
+    "typecheck": "npm --workspace apps/shell run typecheck",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "prettier": "^3.9.7",
+    "typescript": "^5.6.3"
+  }
+}
