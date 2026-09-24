@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import DashboardRemote from 'dashboard/App';
 import CustomersRemote from 'customers/App';
+import SubscriptionsRemote from 'subscriptions/App';
 
 type Customer = {
   id: string;
@@ -111,6 +112,9 @@ function Layout({ children, onLogout }: { children: React.ReactNode; onLogout: (
           <NavLink to="/customers">
             {icon('M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75')} <span>Customers</span>
           </NavLink>
+          <NavLink to="/subscriptions">
+            {icon('M4 7h16M4 12h16M4 17h16')} <span>Subscriptions</span>
+          </NavLink>
         </nav>
       </aside>
       <section className="workspace">
@@ -181,10 +185,12 @@ export default function App() {
   const detail = location.pathname.match(/^\/customers\/(.+)$/);
   const remoteRows = rows as unknown as Array<Record<string, string>>;
   const page =
-    location.pathname === '/customers' ? (
-      <CustomersRemote page="customers" rows={remoteRows} onNavigate={navigate} />
+    location.pathname === '/subscriptions' ? (
+      <SubscriptionsRemote />
+    ) : location.pathname === '/customers' ? (
+      <CustomersRemote page="customers" rows={remoteRows} onNavigate={navigate} onDeleted={(id) => setRows((current) => current.filter((customer) => customer.id !== id))} />
     ) : detail ? (
-      <CustomersRemote page="details" rows={remoteRows} onNavigate={navigate} />
+      <CustomersRemote page="details" rows={remoteRows} onNavigate={navigate} onDeleted={(id) => setRows((current) => current.filter((customer) => customer.id !== id))} />
     ) : (
       <DashboardRemote rows={remoteRows} />
     );

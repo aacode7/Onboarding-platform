@@ -3,9 +3,10 @@ WORKDIR /app
 COPY package*.json ./
 COPY apps ./apps
 COPY tsconfig.json ./tsconfig.json
-RUN npm ci
+RUN npm install --ignore-scripts --no-audit --no-fund
 RUN npm --workspace apps/dashboard run build && cp -r apps/dashboard/dist /app/dashboard-dist
 RUN npm --workspace apps/customers run build && cp -r apps/customers/dist /app/customers-dist
+RUN npm --workspace apps/subscriptions run build && cp -r apps/subscriptions/dist /app/subscriptions-dist
 RUN npm --workspace apps/shell run build
 
 FROM nginx:1.27-alpine AS shell
@@ -20,5 +21,10 @@ EXPOSE 80
 
 FROM nginx:1.27-alpine AS customers
 COPY --from=build /app/customers-dist /usr/share/nginx/html
+COPY nginx-remote.conf /etc/nginx/conf.d/default.conf
+EXPOSE 80
+
+FROM nginx:1.27-alpine AS subscriptions
+COPY --from=build /app/subscriptions-dist /usr/share/nginx/html
 COPY nginx-remote.conf /etc/nginx/conf.d/default.conf
 EXPOSE 80

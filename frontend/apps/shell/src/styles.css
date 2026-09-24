@@ -368,6 +368,44 @@ h2 {
   background: #064a4f !important;
   color: white !important;
 }
+.subscriptions-page { background: #f8fafc; color: #0f172a; margin: -32px; padding: 32px; min-height: 100vh; }
+.plan-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 18px;
+}
+.subscriptions-page .plan-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.subscriptions-page .plan-card { background: white; border-color: #dbe5ec; color: #0f172a; box-shadow: 0 14px 32px -24px rgba(15, 23, 42, .35); }
+.project-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-bottom: 24px; }
+.project-card { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 18px; border: 1px solid #dbe5ec; border-radius: 12px; color: #0f172a; background: white; text-align: left; cursor: pointer; }
+.project-card.active { border-color: #079ddc; box-shadow: 0 0 0 2px rgba(7,157,220,.2); }
+.project-card-icon { color: #00b7f1; font-size: 22px; }
+.project-card small { color: #64748b; }
+.project-hint { margin: 28px 0; }
+.new-plan-button { margin: 0 0 20px; padding: 10px 16px; border: 0; border-radius: 6px; cursor: pointer; }
+.plan-card-header,
+.form-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.plan-card h2 { margin: 0; font-size: 18px; }
+.plan-price { display: block; margin: 24px 0 8px; font-size: 32px; }
+.plan-price small { color: #8191a0; font-size: 12px; font-weight: 400; }
+.plan-features { min-height: 38px; color: #64748b; line-height: 1.6; }
+.plan-card button { margin-top: 16px; }
+.plan-form { max-width: 900px; margin-bottom: 20px; }
+.plan-form h2 { margin-top: 0; font-size: 18px; }
+.plan-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 20px; }
+.plan-form label { color: #486074; font-size: 13px; font-weight: 700; }
+.plan-form input { display: block; width: 100%; margin-top: 7px; padding: 11px; border: 1px solid #d5dfe5; border-radius: 5px; font: inherit; }
+.plan-form textarea { display: block; width: 100%; margin-top: 7px; padding: 11px; border: 1px solid #d5dfe5; border-radius: 5px; font: inherit; resize: vertical; }
+.checkbox-field { display: flex; align-items: center; gap: 8px; padding-top: 28px; }
+.checkbox-field input { width: auto; margin: 0; }
+.plan-form select { display: block; width: 100%; margin-top: 7px; padding: 11px; border: 1px solid #d5dfe5; border-radius: 5px; font: inherit; background: white; }
+.plan-product { margin: 12px 0; color: #617486; font-size: 13px; }
+.form-actions { justify-content: flex-end; margin-top: 20px; }
 .kpis {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -591,3 +629,29 @@ th {
     display: none;
   }
 }
+
+.plan-form input:focus { outline: 2px solid rgba(0, 91, 96, .16); border-color: #005b60; }
+.plan-form .form-actions { justify-content: flex-end; margin-top: 22px; }
+.plan-card-actions { display: flex; gap: 8px; }
+.plan-card-actions .danger { color: #b42318; border-color: #f1b6b0; }
+.plan-card-actions { align-items: center; margin-top: 16px; }
+.plan-card-actions button { margin-top: 0; min-width: 84px; padding: 10px 14px; line-height: 1.2; text-align: center; }
+.plan-form textarea { white-space: pre-wrap; word-break: normal; overflow-wrap: break-word; }
+.plan-features { display: grid; gap: 8px; }
+.plan-features span { display: block; color: #526b7f; }
+.feature-editor { display: grid; gap: 8px; margin-top: 7px; }
+.feature-row { display: flex; gap: 8px; align-items: center; }
+.feature-row input { flex: 1; margin-top: 0; }
+.feature-row button, .add-feature { padding: 8px 10px; font-size: 12px; }
+.add-feature { width: fit-content; color: #08777a; }
+.detail-actions { display: flex; justify-content: flex-end; margin: -18px 0 18px; }
+.danger-button { border: 1px solid #efb4b0; border-radius: 6px; padding: 10px 14px; color: #b42318; background: #fff7f6; font-weight: 700; cursor: pointer; }
+.danger-button:hover { background: #feeceb; }
+.danger-button:disabled { cursor: not-allowed; opacity: .55; }
+.modal-backdrop { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 24px; background: rgba(15, 23, 42, .38); }
+.confirm-modal { width: min(100%, 460px); padding: 28px; border: 1px solid #e4e9ee; border-radius: 14px; background: white; box-shadow: 0 24px 70px rgba(15, 23, 42, .24); }
+.confirm-icon { display: grid; place-items: center; width: 38px; height: 38px; margin-bottom: 16px; border-radius: 50%; color: #b42318; background: #feeceb; font-weight: 900; }
+.confirm-modal h2 { margin: 0 0 8px; color: #102a43; font-size: 20px; }
+.confirm-modal p { margin: 0; color: #62758a; line-height: 1.6; }
+.confirm-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px; }
+.confirm-actions button { padding: 10px 14px; border-radius: 6px; }

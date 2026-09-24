@@ -8,7 +8,7 @@
   ],
   "scripts": {
     "dev": "npm --workspace apps/shell run dev",
-    "build": "npm --workspace apps/dashboard run build && npm --workspace apps/customers run build && npm --workspace apps/shell run build",
+    "build": "npm --workspace apps/dashboard run build && npm --workspace apps/customers run build && npm --workspace apps/subscriptions run build && npm --workspace apps/shell run build",
     "typecheck": "npm --workspace apps/shell run typecheck",
     "format": "prettier --write .",
     "format:check": "prettier --check ."

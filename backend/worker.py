@@ -5,7 +5,7 @@ import os
 from app.scheduler import SubscriptionScheduler
 from app.services.subscription_service import SubscriptionService
 
-from .main import connection, initialize_database
+from .main import connection, initialize_database_with_retry
 from .subscription_store import PostgresSubscriptionStore
 
 logging.basicConfig(level=logging.INFO)
@@ -14,7 +14,7 @@ INTERVAL_SECONDS = int(os.getenv('ONBOARDING_SUBSCRIPTION_INTERVAL_SECONDS', '60
 
 
 async def run() -> None:
-    initialize_database()
+    initialize_database_with_retry()
     scheduler = SubscriptionScheduler(
         SubscriptionService(PostgresSubscriptionStore(connection)),
         interval_seconds=INTERVAL_SECONDS,

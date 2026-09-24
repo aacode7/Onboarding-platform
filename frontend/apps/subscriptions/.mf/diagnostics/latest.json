@@ -1,0 +1,10 @@
+{
+  "latestErrorEvent": {
+    "code": "TYPE-001",
+    "message": "Failed to generate type declaration. Execute the below cmd to reproduce and fix the error. #TYPE-001\nargs: {\"cmd\":\"/home/codedreamer/.nvm/versions/node/v20.20.0/bin/node /home/codedreamer/Documents/GitHub/Onboarding-platform/frontend/node_modules/typescript/bin/tsc --project /home/codedreamer/Documents/GitHub/Onboarding-platform/frontend/apps/subscriptions/node_modules/.federation/tsconfig.9e4273c7694e7bd864907684a4d7c893.json\"}\nView the docs to see how to solve: https://module-federation.io/guide/troubleshooting/type#type-001",
+    "args": {
+      "cmd": "/home/codedreamer/.nvm/versions/node/v20.20.0/bin/node /home/codedreamer/Documents/GitHub/Onboarding-platform/frontend/node_modules/typescript/bin/tsc --project /home/codedreamer/Documents/GitHub/Onboarding-platform/frontend/apps/subscriptions/node_modules/.federation/tsconfig.9e4273c7694e7bd864907684a4d7c893.json"
+    },
+    "timestamp": 1790166448234
+  }
+}

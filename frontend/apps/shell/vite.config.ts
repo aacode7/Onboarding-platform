@@ -24,6 +24,13 @@ export default defineConfig({
           entryGlobalName: 'customers',
           shareScope: 'default',
         },
+        subscriptions: {
+          type: 'module',
+          name: 'subscriptions',
+          entry: 'http://localhost:5003/remoteEntry.js',
+          entryGlobalName: 'subscriptions',
+          shareScope: 'default',
+        },
       },
       shared: {
         react: { singleton: true, requiredVersion: '^19.0.0' },

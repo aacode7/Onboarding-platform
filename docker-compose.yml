@@ -10,6 +10,7 @@ services:
     environment:
       SUBSCRIPTION_PACKAGE_ID: ${SUBSCRIPTION_PACKAGE_ID:-onboarding-free-trial}
     network_mode: host
+    restart: on-failure
 
   subscription-worker:
     build:
@@ -22,6 +23,7 @@ services:
     environment:
       SUBSCRIPTION_PACKAGE_ID: ${SUBSCRIPTION_PACKAGE_ID:-onboarding-free-trial}
     network_mode: host
+    restart: on-failure
     command: ["/venv/bin/python", "-m", "backend.worker"]
 
   frontend:
@@ -47,3 +49,10 @@ services:
       target: customers
     ports:
       - "5002:80"
+  subscriptions:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: subscriptions
+    ports:
+      - "5003:80"

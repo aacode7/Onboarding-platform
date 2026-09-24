@@ -24,10 +24,21 @@ function Info({ label, value }: { label: string; value: string }) {
     </div>
   );
 }
-function Details({ c }: { c: Customer }) {
+function Details({ c, onDeleted }: { c: Customer; onDeleted: (id: string) => void }) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
+  const deleteCustomer = async () => {
+    setDeleting(true); setDeleteError('');
+    const token = sessionStorage.getItem('onboarding_admin');
+    const response = await fetch(`/api/onboarding/customers/${c.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+    if (!response.ok) { setDeleteError((await response.json()).detail || 'Unable to delete customer'); setDeleting(false); return; }
+    onDeleted(c.id);
+  };
   return (
     <>
       <Title text={c.name} sub="Complete onboarding information." />
+      <div className="detail-actions"><button className="danger-button" type="button" onClick={() => setConfirmDelete(true)}>Delete customer</button></div>
       <div className="grid">
         <div className="card">
           <h2>Customer Information</h2>
@@ -46,6 +57,7 @@ function Details({ c }: { c: Customer }) {
           <Info label="Days Remaining" value={String(left(c.trial_end_date))} />
         </div>
       </div>
+      {confirmDelete && <div className="modal-backdrop" role="presentation"><div className="confirm-modal" role="alertdialog" aria-modal="true" aria-labelledby="delete-title"><div className="confirm-icon">!</div><h2 id="delete-title">Delete customer permanently?</h2><p>This will remove <strong>{c.name}</strong> and all linked onboarding and ReconQ data. This action cannot be undone.</p><div className="confirm-actions"><button type="button" onClick={() => setConfirmDelete(false)}>Cancel</button><button type="button" className="danger-button" onClick={deleteCustomer} disabled={deleting}>{deleting ? 'Deleting…' : 'Delete permanently'}</button>{deleteError && <p className="error">{deleteError}</p>}</div></div></div>}
     </>
   );
 }
@@ -64,15 +76,17 @@ export default function Customers({
   page,
   rows,
   onNavigate,
+  onDeleted,
 }: {
   page: string;
   rows: Array<Record<string, string>>;
   onNavigate: (path: string) => void;
+  onDeleted: (id: string) => void;
 }) {
   const customers = rows as unknown as Customer[];
   if (page === 'details') {
     const c = customers.find((item) => item.id === location.pathname.split('/').pop());
-    return c ? <Details c={c} /> : <p className="empty">Customer not found.</p>;
+    return c ? <Details c={c} onDeleted={(id) => { onDeleted(id); onNavigate('/customers'); }} /> : <p className="empty">Customer not found.</p>;
   }
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState('ALL');
