@@ -14,7 +14,6 @@ type Customer = {
   subscription_status: string;
   status?: string;
   trial_start_date: string;
-  trial_end_date: string;
   created_at: string;
 };
 

@@ -383,6 +383,9 @@ h2 {
 .project-card small { color: #64748b; }
 .project-hint { margin: 28px 0; }
 .new-plan-button { margin: 0 0 20px; padding: 10px 16px; border: 0; border-radius: 6px; cursor: pointer; }
+.plan-create-actions { display: flex; gap: 10px; margin: 0 0 20px; }
+.plan-create-actions .secondary { padding: 10px 16px; border: 1px solid #0f766e; border-radius: 6px; background: transparent; color: #0f766e; cursor: pointer; }
+.plan-create-actions .secondary:hover { background: #ecfeff; }
 .plan-card-header,
 .form-actions {
   display: flex;

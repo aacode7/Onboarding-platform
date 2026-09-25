@@ -13,15 +13,22 @@ import psycopg
 from psycopg.rows import dict_row
 from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException, BackgroundTasks
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
 import jwt
 import httpx
+
+from app.services.subscription_service import SubscriptionService
+
+from .subscription_store import PostgresSubscriptionStore
 
 load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
 DATABASE_URL = os.getenv('ONBOARDING_DATABASE_URL', 'postgresql://onboarding_app:change-this-password@localhost:5432/onboarding_db')
 API_KEY = os.getenv('ONBOARDING_API_KEY', '')
 RECONQ_WEBHOOK_URL = os.getenv('RECONQ_WEBHOOK_URL', '')
 RECONQ_WEBHOOK_SECRET = os.getenv('RECONQ_WEBHOOK_SECRET', '')
+INTELLQ_WEBHOOK_URL = os.getenv('INTELLQ_WEBHOOK_URL', '')
+INTELLQ_WEBHOOK_SECRET = os.getenv('INTELLQ_WEBHOOK_SECRET', '')
 ADMIN_EMAIL = os.getenv('ONBOARDING_ADMIN_EMAIL', 'admin@example.com')
 ADMIN_PASSWORD = os.getenv('ONBOARDING_ADMIN_PASSWORD')
 ACCESS_TOKEN_SECRET = os.getenv('ONBOARDING_ACCESS_TOKEN_SECRET') or secrets.token_urlsafe(32)
@@ -29,18 +36,22 @@ REFRESH_TOKEN_SECRET = os.getenv('ONBOARDING_REFRESH_TOKEN_SECRET') or secrets.t
 ACCESS_TOKEN_MINUTES = int(os.getenv('ONBOARDING_ACCESS_TOKEN_MINUTES', '15'))
 REFRESH_TOKEN_DAYS = int(os.getenv('ONBOARDING_REFRESH_TOKEN_DAYS', '7'))
 FREE_TRIAL_PLAN_ID = '2f1c0d5e-5b6e-4c38-9f76-8a7e5d2b1c40'
+TRIAL_DURATION_DAYS = int(os.getenv('ONBOARDING_TRIAL_DURATION_DAYS', '15'))
 
 def connection(): return psycopg.connect(DATABASE_URL, row_factory=dict_row)
 
 def notify_reconq(event: str, plan: dict):
-    if not RECONQ_WEBHOOK_URL or not RECONQ_WEBHOOK_SECRET: return
     import json
     payload = json.dumps({'event': event, ('customer' if event == 'customer.deleted' else 'plan'): plan}, separators=(',', ':'), default=str)
-    signature = hmac.new(RECONQ_WEBHOOK_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
-    try:
-        httpx.post(RECONQ_WEBHOOK_URL, content=payload, headers={'Content-Type': 'application/json', 'X-ReconQ-Signature': signature}, timeout=5)
-    except httpx.HTTPError:
-        logging.getLogger(__name__).exception('Unable to notify ReconQ about %s', event)
+    targets = [('ReconQ', RECONQ_WEBHOOK_URL, RECONQ_WEBHOOK_SECRET)] if event == 'customer.deleted' else [('ReconQ', RECONQ_WEBHOOK_URL, RECONQ_WEBHOOK_SECRET), ('IntellQ', INTELLQ_WEBHOOK_URL, INTELLQ_WEBHOOK_SECRET)]
+    for label, url, secret in targets:
+        if not url or not secret:
+            continue
+        signature = hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
+        try:
+            httpx.post(url, content=payload, headers={'Content-Type': 'application/json', 'X-ReconQ-Signature': signature}, timeout=5)
+        except httpx.HTTPError:
+            logging.getLogger(__name__).exception('Unable to notify %s about %s', label, event)
 
 @asynccontextmanager
 async def lifespan(_app):
@@ -48,6 +59,12 @@ async def lifespan(_app):
     yield
 
 app = FastAPI(title='Onboarding Platform', lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[origin.strip() for origin in os.getenv('ONBOARDING_CORS_ORIGINS', 'http://localhost:3000,http://localhost:4000').split(',') if origin.strip()],
+    allow_methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allow_headers=['*'],
+)
 logger = logging.getLogger(__name__)
 
 class Customer(BaseModel):
@@ -58,13 +75,19 @@ class Customer(BaseModel):
     email: EmailStr
     product: str = 'Application'
     subscription_status: str = 'TRIAL'
-    trial_start_date: datetime
-    trial_end_date: datetime
-    created_at: datetime
+    trial_start_date: datetime | None = None
+    created_at: datetime | None = None
 
 class Login(BaseModel):
     email: EmailStr
     password: str
+
+class SubscriptionTokenRequest(BaseModel):
+    email: EmailStr
+    plan: str = "Free Trial"
+class SubscriptionTokenConsumeRequest(BaseModel):
+    email: EmailStr
+    token: str
 
 class PlanInput(BaseModel):
     name: str
@@ -81,8 +104,9 @@ def initialize_database():
         conn.execute('''CREATE TABLE IF NOT EXISTS onboarding_customers (
             id UUID PRIMARY KEY, tenant_id TEXT NOT NULL, user_id TEXT NOT NULL,
             name TEXT NOT NULL, email TEXT NOT NULL, product TEXT NOT NULL,
-            trial_start_date TIMESTAMPTZ NOT NULL, trial_end_date TIMESTAMPTZ NOT NULL,
+            trial_start_date TIMESTAMPTZ NOT NULL,
             created_at TIMESTAMPTZ NOT NULL)''')
+        conn.execute('ALTER TABLE onboarding_customers DROP COLUMN IF EXISTS trial_end_date')
         conn.execute('ALTER TABLE onboarding_customers DROP COLUMN IF EXISTS subscription_status')
         conn.execute('''CREATE UNIQUE INDEX IF NOT EXISTS onboarding_customers_user_id_uq
             ON onboarding_customers(user_id)''')
@@ -137,10 +161,8 @@ def initialize_database():
         END $$''')
         conn.execute('''CREATE UNIQUE INDEX IF NOT EXISTS subscriptions_customer_plan_uq
             ON subscriptions(customer_id, plan_id)''')
-        conn.execute('''INSERT INTO subscription_plans
-            (id, name, price_minor, annual_price_minor, currency, entitlements, description, product)
-            VALUES (%s, 'Onboarding Free Trial', 0, 0, 'INR', '{}', '', '')
-            ON CONFLICT (id) DO NOTHING''', (FREE_TRIAL_PLAN_ID,))
+        conn.execute("DO $$ BEGIN IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'trial_signup_tokens') AND NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'subscription_signup_tokens') THEN ALTER TABLE trial_signup_tokens RENAME TO subscription_signup_tokens; END IF; END $$;")
+        conn.execute("CREATE TABLE IF NOT EXISTS subscription_signup_tokens (id UUID PRIMARY KEY, email TEXT NOT NULL, plan TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE, created_at TIMESTAMPTZ NOT NULL, expires_at TIMESTAMPTZ NOT NULL, consumed_at TIMESTAMPTZ)")
         conn.execute('''CREATE TABLE IF NOT EXISTS admin_users (
             email TEXT PRIMARY KEY, password_hash TEXT NOT NULL,
             password_salt TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL)''')
@@ -226,6 +248,10 @@ def refresh(credentials: Refresh):
 @app.post('/api/onboarding/customers', status_code=201)
 def create_customer(customer: Customer, authorization: str | None = Header(default=None)):
     require_service(authorization)
+    now = datetime.now(timezone.utc)
+    customer.created_at = customer.created_at or now
+    customer.trial_start_date = customer.trial_start_date or now
+    subscription_end = now + timedelta(days=TRIAL_DURATION_DAYS)
     with closing(connection()) as conn:
         existing = conn.execute(
             'SELECT id FROM onboarding_customers WHERE user_id=%s',
@@ -234,32 +260,41 @@ def create_customer(customer: Customer, authorization: str | None = Header(defau
         customer_id = str(existing['id']) if existing else (customer.id or str(uuid4()))
         conn.execute('''INSERT INTO onboarding_customers
             (id, tenant_id, user_id, name, email, product,
-             trial_start_date, trial_end_date, created_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+             trial_start_date, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (user_id) DO UPDATE SET tenant_id=EXCLUDED.tenant_id,
             user_id=EXCLUDED.user_id, name=EXCLUDED.name, email=EXCLUDED.email,
             product=EXCLUDED.product, trial_start_date=EXCLUDED.trial_start_date,
-            trial_end_date=EXCLUDED.trial_end_date''',
+            created_at=EXCLUDED.created_at''',
             (customer_id, customer.tenant_id, customer.user_id, customer.name,
-             customer.email, customer.product, customer.trial_start_date,
-             customer.trial_end_date, customer.created_at))
+             customer.email, customer.product, customer.trial_start_date, customer.created_at))
+        plan = conn.execute('''SELECT id FROM subscription_plans
+            WHERE price_minor = 0 AND product = %s
+            ORDER BY name LIMIT 1''', (customer.product,)).fetchone()
+        if not plan:
+            raise HTTPException(409, f'No free subscription plan configured for product {customer.product}')
         conn.execute('''INSERT INTO subscriptions
             (id, customer_id, plan_id, status, created_at, trial_end_at, period_end_at)
             VALUES (%s, %s, %s, 'trialing', %s, %s, %s)
             ON CONFLICT DO NOTHING''',
-            (str(uuid4()), customer_id, FREE_TRIAL_PLAN_ID, customer.created_at,
-             customer.trial_end_date, customer.trial_end_date))
+            (str(uuid4()), customer_id, plan['id'], customer.created_at,
+             subscription_end, subscription_end))
         conn.commit()
     customer.id = customer_id
     return {'customer': customer}
 
 def customer_query(where=''):
-    return f'''SELECT *, CASE
-                   WHEN trial_end_date < NOW() THEN 'EXPIRED'
-                   WHEN trial_end_date <= NOW() + INTERVAL '7 days' THEN 'EXPIRING_SOON'
+    return f'''SELECT c.*, s.period_end_at AS subscription_end_at, CASE
+                   WHEN s.status = 'expired' OR s.period_end_at < NOW() THEN 'EXPIRED'
+                   WHEN s.period_end_at <= NOW() + INTERVAL '7 days' THEN 'EXPIRING_SOON'
                    ELSE 'TRIAL'
                END AS status
-               FROM onboarding_customers {where} ORDER BY created_at DESC'''
+               FROM onboarding_customers c
+               LEFT JOIN LATERAL (
+                   SELECT period_end_at, status FROM subscriptions
+                   WHERE customer_id = c.id ORDER BY created_at DESC LIMIT 1
+               ) s ON TRUE
+               {where.replace('WHERE ', 'WHERE c.')} ORDER BY c.created_at DESC'''
 
 @app.get('/api/onboarding/customers')
 def list_customers(authorization: str | None = Header(default=None)):
@@ -285,6 +320,63 @@ def delete_customer(customer_id: str, background_tasks: BackgroundTasks, authori
         conn.commit()
     background_tasks.add_task(notify_reconq, 'customer.deleted', dict(customer))
     return {'deleted': True, 'id': customer_id}
+
+@app.get('/api/subscription-entitlements/{customer_id}/{key}')
+def check_subscription_entitlement(customer_id: str, key: str, authorization: str | None = Header(default=None)):
+    require_service(authorization)
+    result = SubscriptionService(PostgresSubscriptionStore(connection)).has_entitlement(customer_id, key)
+    return {'customer_id': result.customer_id, 'key': result.key, 'allowed': result.allowed}
+
+
+@app.post("/api/public/subscription-token")
+def create_subscription_token(req: SubscriptionTokenRequest):
+    raw_token = secrets.token_urlsafe(32)
+    now = datetime.now(timezone.utc)
+    with closing(connection()) as conn:
+        conn.execute("DELETE FROM subscription_signup_tokens WHERE expires_at <= %s", (now,))
+        conn.execute("INSERT INTO subscription_signup_tokens (id, email, plan, token_hash, created_at, expires_at) VALUES (%s, %s, %s, %s, %s, %s)", (str(uuid4()), str(req.email), req.plan, hashlib.sha256(raw_token.encode()).hexdigest(), now, now + timedelta(minutes=30)))
+        conn.commit()
+    return {"token": raw_token, "expires_at": now + timedelta(minutes=30)}
+
+
+@app.post("/api/public/subscription-token/consume")
+def consume_subscription_token(req: SubscriptionTokenConsumeRequest):
+    token_hash = hashlib.sha256(req.token.encode()).hexdigest()
+    now = datetime.now(timezone.utc)
+    with closing(connection()) as conn:
+        conn.execute("DELETE FROM subscription_signup_tokens WHERE expires_at <= %s", (now,))
+        row = conn.execute("UPDATE subscription_signup_tokens SET consumed_at=%s WHERE token_hash=%s AND email=%s AND consumed_at IS NULL AND expires_at>%s RETURNING email, plan", (now, token_hash, str(req.email), now)).fetchone()
+        conn.commit()
+    if not row:
+        raise HTTPException(status_code=400, detail="This signup link is invalid or expired.")
+    return {"valid": True, "email": row["email"], "plan": row["plan"]}
+
+
+@app.get("/api/public/subscription-token/status")
+def subscription_token_status(token: str, email: EmailStr):
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    now = datetime.now(timezone.utc)
+    with closing(connection()) as conn:
+        row = conn.execute("SELECT email, expires_at, consumed_at FROM subscription_signup_tokens WHERE token_hash=%s AND email=%s", (token_hash, str(email))).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Signup link not found")
+        if row["expires_at"] <= now:
+            conn.execute("DELETE FROM subscription_signup_tokens WHERE token_hash=%s", (token_hash,))
+            conn.commit()
+            raise HTTPException(status_code=410, detail="This signup link has expired")
+        if row["consumed_at"]:
+            raise HTTPException(status_code=410, detail="This signup link has already been used")
+    return {"valid": True, "expires_at": row["expires_at"]}
+
+
+@app.get('/api/public/subscription-plans')
+def public_subscription_plans():
+    with closing(connection()) as conn:
+        rows = conn.execute('''SELECT id, name, price_minor, annual_price_minor, currency, product, popular, description,
+            array_to_string(entitlements, E'\n') AS features
+            FROM subscription_plans WHERE product IS NOT NULL AND product <> '' ORDER BY price_minor, name''').fetchall()
+    return [{**row, 'price': row.pop('price_minor') / 100, 'annual_price': row.pop('annual_price_minor') / 100} for row in rows]
+
 
 @app.get('/api/subscription-plans')
 def list_subscription_plans(authorization: str | None = Header(default=None)):

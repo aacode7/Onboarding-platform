@@ -2,7 +2,7 @@ type Customer = {
   id: string;
   name: string;
   status?: string;
-  trial_end_date: string;
+  subscription_end_at: string;
   created_at: string;
 };
 const left = (v: string) => Math.max(0, Math.ceil((new Date(v).getTime() - Date.now()) / 86400000));
@@ -14,7 +14,7 @@ export default function Dashboard({ rows }: { rows: Array<Record<string, string>
   const customers = rows as unknown as Customer[];
   const active = customers.filter((c) => c.status !== 'EXPIRED');
   const expired = customers.filter((c) => c.status === 'EXPIRED');
-  const soon = active.filter((c) => left(c.trial_end_date) <= 7);
+  const soon = active.filter((c) => left(c.subscription_end_at) <= 7);
   return (
     <>
       <div className="page-title">

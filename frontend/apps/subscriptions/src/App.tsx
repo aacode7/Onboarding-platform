@@ -10,6 +10,7 @@ export default function Subscriptions() {
   const [products, setProducts] = useState<string[]>([]);
   const [selectedProduct, setSelectedProduct] = useState<string>('');
   const [featureRows, setFeatureRows] = useState<string[]>(['']);
+  const [freePlanPreset, setFreePlanPreset] = useState(false);
   const token = sessionStorage.getItem('onboarding_admin');
   const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
   const projectNames = [...new Set([...products, ...plans.map((plan) => plan.product).filter((product) => product && product !== 'Application')])];
@@ -46,7 +47,7 @@ export default function Subscriptions() {
       </div>
 
       {!selectedProduct && <p className="muted project-hint">Select a project to view or create its subscription plans.</p>}
-      {selectedProduct && !formOpen && <button className="primary new-plan-button" type="button" onClick={() => { setEditing(null); setFeatureRows(['']); setFormOpen(true); }}>Create subscription plan</button>}
+      {selectedProduct && !formOpen && <div className="plan-create-actions"><button className="primary" type="button" onClick={() => { setEditing(null); setFreePlanPreset(false); setFeatureRows(['']); setFormOpen(true); }}>Create subscription plan</button>{!plans.some((plan) => plan.product === selectedProduct && plan.price === 0) && <button className="secondary" type="button" onClick={() => { setEditing(null); setFreePlanPreset(true); setFeatureRows(['15-day access', 'No credit card required']); setFormOpen(true); }}>Create free plan</button>}</div>}
 
       {formOpen && (
         <form className="card plan-form" onKeyDown={(event) => { if (event.key === 'Enter' && (event.target as HTMLElement).tagName !== 'TEXTAREA') event.preventDefault(); }} onSubmit={(event) => {
@@ -67,20 +68,21 @@ export default function Subscriptions() {
             .catch(() => setError('Unable to save subscription plan'));
           event.currentTarget.reset();
           setEditing(null);
+          setFreePlanPreset(false);
           setFormOpen(false);
         }}>
-          <h2>{editing ? 'Edit plan' : 'New plan'}</h2>
+          <h2>{editing ? 'Edit plan' : freePlanPreset ? 'Create free plan' : 'New plan'}</h2>
           <div className="plan-form-grid">
-            <label>Plan name<input name="name" required defaultValue={editing?.name} placeholder="Business" /></label>
-            <label>Monthly price<input name="price" required type="number" min="0" step="0.01" defaultValue={editing?.price} placeholder="99" /></label>
-            <label>Annual price<input name="annual_price" required type="number" min="0" step="0.01" defaultValue={editing?.annual_price} placeholder="999" /></label>
+            <label>Plan name<input name="name" required defaultValue={editing?.name || (freePlanPreset ? 'Free Trial' : '')} placeholder="Business" /></label>
+            <label>Monthly price<input name="price" required type="number" min="0" step="0.01" defaultValue={editing?.price ?? (freePlanPreset ? 0 : '')} placeholder="99" /></label>
+            <label>Annual price<input name="annual_price" required type="number" min="0" step="0.01" defaultValue={editing?.annual_price ?? (freePlanPreset ? 0 : '')} placeholder="999" /></label>
             <label>Project<input value={editing?.product || selectedProduct} readOnly /><input type="hidden" name="product" value={editing?.product || selectedProduct} /></label>
             <label>Currency<input name="currency" required defaultValue={editing?.currency || 'INR'} placeholder="USD" /></label>
-            <label>Description<input name="description" required defaultValue={editing?.description} placeholder="For established teams" /></label>
+            <label>Description<input name="description" required defaultValue={editing?.description || (freePlanPreset ? 'Start with a free trial for your team.' : '')} placeholder="For established teams" /></label>
             <label>Features<div className="feature-editor">{featureRows.map((feature, index) => <div className="feature-row" key={index}><input name="features" required value={feature} placeholder="Unlimited accounts" onChange={(event) => setFeatureRows((current) => current.map((item, itemIndex) => itemIndex === index ? event.target.value : item))} />{featureRows.length > 1 && <button type="button" onClick={() => setFeatureRows((current) => current.filter((_, itemIndex) => itemIndex !== index))}>Remove</button>}</div>)}<button type="button" className="add-feature" onClick={() => setFeatureRows((current) => [...current, ''])}>+ Add feature</button></div></label>
             <label className="checkbox-field"><input name="popular" type="checkbox" defaultChecked={editing?.popular} /> Mark as most popular</label>
           </div>
-          <div className="form-actions"><button type="button" onClick={() => { setEditing(null); setFormOpen(false); }}>Cancel</button><button className="primary" type="submit">Save plan</button></div>
+          <div className="form-actions"><button type="button" onClick={() => { setEditing(null); setFreePlanPreset(false); setFormOpen(false); }}>Cancel</button><button className="primary" type="submit">Save plan</button></div>
         </form>
       )}
 

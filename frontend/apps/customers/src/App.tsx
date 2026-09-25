@@ -8,7 +8,7 @@ type Customer = {
   status?: string;
   subscription_status?: string;
   trial_start_date: string;
-  trial_end_date: string;
+  subscription_end_at: string;
   created_at: string;
 };
 const date = (v: string) =>
@@ -53,8 +53,8 @@ function Details({ c, onDeleted }: { c: Customer; onDeleted: (id: string) => voi
           <h2>Trial Information</h2>
           <Info label="Trial Status" value={c.status || c.subscription_status || 'TRIAL'} />
           <Info label="Trial Start Date" value={date(c.trial_start_date)} />
-          <Info label="Trial End Date" value={date(c.trial_end_date)} />
-          <Info label="Days Remaining" value={String(left(c.trial_end_date))} />
+          <Info label="Subscription End Date" value={date(c.subscription_end_at)} />
+          <Info label="Days Remaining" value={String(left(c.subscription_end_at))} />
         </div>
       </div>
       {confirmDelete && <div className="modal-backdrop" role="presentation"><div className="confirm-modal" role="alertdialog" aria-modal="true" aria-labelledby="delete-title"><div className="confirm-icon">!</div><h2 id="delete-title">Delete customer permanently?</h2><p>This will remove <strong>{c.name}</strong> and all linked onboarding and ReconQ data. This action cannot be undone.</p><div className="confirm-actions"><button type="button" onClick={() => setConfirmDelete(false)}>Cancel</button><button type="button" className="danger-button" onClick={deleteCustomer} disabled={deleting}>{deleting ? 'Deleting…' : 'Delete permanently'}</button>{deleteError && <p className="error">{deleteError}</p>}</div></div></div>}
@@ -134,7 +134,7 @@ export default function Customers({
                     {c.status === 'EXPIRING_SOON' ? 'EXPIRING SOON' : c.status}
                   </span>
                 </td>
-                <td>{date(c.trial_end_date)}</td>
+                <td>{date(c.subscription_end_at)}</td>
                 <td>
                   <button className="link-button">View</button>
                 </td>
