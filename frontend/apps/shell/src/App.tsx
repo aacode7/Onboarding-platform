@@ -162,6 +162,9 @@ export default function App() {
       if (response.ok) setRows(await response.json());
     };
     load();
+    const refresh = window.setInterval(load, 10000);
+    window.addEventListener('focus', load);
+    return () => { window.clearInterval(refresh); window.removeEventListener('focus', load); };
   }, [loggedIn]);
   if (!loggedIn)
     return (
