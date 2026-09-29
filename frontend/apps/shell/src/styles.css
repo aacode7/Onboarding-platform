@@ -658,3 +658,46 @@ th {
 .confirm-modal p { margin: 0; color: #62758a; line-height: 1.6; }
 .confirm-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px; }
 .confirm-actions button { padding: 10px 14px; border-radius: 6px; }
+
+.trial-editor {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 0;
+  border-bottom: 1px solid #edf1f3;
+}
+.trial-editor-label {
+  display: block;
+  color: #18364a;
+  font-size: 13px;
+  font-weight: 700;
+}
+.trial-editor small { color: #8191a0; font-size: 11px; }
+.trial-editor-controls { display: flex; align-items: center; gap: 8px; }
+.trial-date-input {
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid #d5e0e5;
+  border-radius: 7px;
+  color: #18364a;
+  background: #fff;
+  font: inherit;
+  color-scheme: light only;
+}
+.trial-save-button, .trial-cancel-button {
+  min-height: 36px;
+  padding: 0 13px;
+  border-radius: 7px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.trial-save-button { border: 1px solid #064a4f; background: #064a4f; color: #fff; }
+.trial-cancel-button { border: 1px solid #d5e0e5; background: #fff; color: #526575; }
+
+.trial-date-picker { position: relative; display: flex; align-items: center; }
+.calendar-button {
+  width: 36px; height: 36px; margin-left: -44px; border: 0; background: transparent;
+  color: #527080; cursor: pointer; font-size: 16px; z-index: 1;
+}
+.hidden-date-picker { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; color-scheme: light only; }

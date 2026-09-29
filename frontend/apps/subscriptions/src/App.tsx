@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 
-type Plan = { id: string; name: string; price: number; annual_price: number; currency: string; description: string; features: string; product: string; popular: boolean; };
+type Plan = { id: string; name: string; price: number; annual_price: number; currency: string; description: string; features: string; product: string; popular: boolean; trial_duration_days: number; };
 
 export default function Subscriptions() {
   const [plans, setPlans] = useState<Plan[]>([]);
@@ -16,7 +16,7 @@ export default function Subscriptions() {
   const projectNames = [...new Set([...products, ...plans.map((plan) => plan.product).filter((product) => product && product !== 'Application')])];
 
   useEffect(() => {
-    fetch('/api/subscription-products', { headers }).then((response) => response.ok ? response.json() : Promise.reject()).then((items: string[]) => setProducts(items.filter((product) => product !== 'Application'))).catch(() => setError('Unable to load products'));
+    fetch('/api/projects', { headers }).then((response) => response.ok ? response.json() : Promise.reject()).then((items: Array<{ name: string }>) => setProducts(items.map((item) => item.name))).catch(() => setError('Unable to load projects'));
     fetch('/api/subscription-plans', { headers })
       .then((response) => response.ok ? response.json() : Promise.reject())
       .then(setPlans)
@@ -62,6 +62,7 @@ export default function Subscriptions() {
             description: String(data.get('description')),
             features: featureRows.filter(Boolean).join('\n'),
             popular: data.get('popular') === 'on',
+            trial_duration_days: Number(data.get('trial_duration_days')),
           };
           fetch(editing ? `/api/subscription-plans/${editing.id}` : '/api/subscription-plans', { method: editing ? 'PUT' : 'POST', headers, body: JSON.stringify(payload) }).then((response) => response.ok ? response.json() : Promise.reject())
             .then((plan) => setPlans((current) => editing ? current.map((item) => item.id === plan.id ? plan : item) : [...current, plan]))
@@ -75,6 +76,7 @@ export default function Subscriptions() {
           <div className="plan-form-grid">
             <label>Plan name<input name="name" required defaultValue={editing?.name || (freePlanPreset ? 'Free Trial' : '')} placeholder="Business" /></label>
             <label>Monthly price<input name="price" required type="number" min="0" step="0.01" defaultValue={editing?.price ?? (freePlanPreset ? 0 : '')} placeholder="99" /></label>
+            <label>Trial duration (days)<input name="trial_duration_days" required type="number" min="1" step="1" defaultValue={editing?.trial_duration_days ?? (freePlanPreset ? 15 : 15)} placeholder="15" /></label>
             <label>Annual price<input name="annual_price" required type="number" min="0" step="0.01" defaultValue={editing?.annual_price ?? (freePlanPreset ? 0 : '')} placeholder="999" /></label>
             <label>Project<input value={editing?.product || selectedProduct} readOnly /><input type="hidden" name="product" value={editing?.product || selectedProduct} /></label>
             <label>Currency<input name="currency" required defaultValue={editing?.currency || 'INR'} placeholder="USD" /></label>

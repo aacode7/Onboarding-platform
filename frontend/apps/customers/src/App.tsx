@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
+import { CalendarDays } from 'lucide-react';
 type Customer = {
   id: string;
   tenant_id: string;
@@ -16,6 +17,8 @@ const date = (v: string) =>
     new Date(v),
   );
 const left = (v: string) => Math.max(0, Math.ceil((new Date(v).getTime() - Date.now()) / 86400000));
+const dateInput = (v: string) => { const d = new Date(v); return `${String(d.getUTCDate()).padStart(2, '0')}/${String(d.getUTCMonth() + 1).padStart(2, '0')}/${d.getUTCFullYear()}`; };
+const isoDate = (v: string) => { const [day, month, year] = v.split('/'); return year && month && day ? `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}` : ''; };
 function Info({ label, value }: { label: string; value: string }) {
   return (
     <div className="info-row">
@@ -28,6 +31,17 @@ function Details({ c, onDeleted }: { c: Customer; onDeleted: (id: string) => voi
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState('');
+  const [editingTrial, setEditingTrial] = useState(false);
+  const [trialEnd, setTrialEnd] = useState(dateInput(c.subscription_end_at));
+  const [trialError, setTrialError] = useState('');
+  const calendarRef = useRef<HTMLInputElement>(null);
+  const updateTrial = async () => {
+    setTrialError('');
+    const token = sessionStorage.getItem('onboarding_admin');
+    const response = await fetch(`/api/onboarding/customers/${c.id}/trial`, { method: 'PATCH', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ trial_end_at: (() => { const [day, month, year] = trialEnd.split('/'); return `${year}-${month}-${day}T23:59:59+05:30`; })() }) });
+    if (!response.ok) { setTrialError((await response.json()).detail || 'Unable to update trial'); return; }
+    window.location.reload();
+  };
   const deleteCustomer = async () => {
     setDeleting(true); setDeleteError('');
     const token = sessionStorage.getItem('onboarding_admin');
@@ -53,7 +67,8 @@ function Details({ c, onDeleted }: { c: Customer; onDeleted: (id: string) => voi
           <h2>Trial Information</h2>
           <Info label="Trial Status" value={c.status || c.subscription_status || 'TRIAL'} />
           <Info label="Trial Start Date" value={date(c.trial_start_date)} />
-          <Info label="Subscription End Date" value={date(c.subscription_end_at)} />
+          {editingTrial ? <div className="trial-editor"><div><span className="trial-editor-label">Subscription End Date</span><small>Choose when this customer's subscription should end.</small></div><div className="trial-editor-controls"><div className="trial-date-picker"><input className="trial-date-input" type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={trialEnd} onChange={(event) => setTrialEnd(event.target.value)} /><button className="calendar-button" type="button" aria-label="Choose trial end date" onClick={() => { const picker = calendarRef.current; if (picker && 'showPicker' in picker) picker.showPicker(); else picker?.click(); }}><CalendarDays size={17} strokeWidth={2} /></button><input ref={calendarRef} className="hidden-date-picker" type="date" value={isoDate(trialEnd)} onChange={(event) => setTrialEnd(dateInput(`${event.target.value}T23:59:59+05:30`))} /></div><button className="trial-save-button" type="button" onClick={updateTrial}>Save changes</button><button className="trial-cancel-button" type="button" onClick={() => setEditingTrial(false)}>Cancel</button></div>{trialError && <small className="error">{trialError}</small>}</div> : <Info label="Subscription End Date" value={date(c.subscription_end_at)} />}
+          {!editingTrial && <button type="button" className="link-button" onClick={() => setEditingTrial(true)}>Change trial end date</button>}
           <Info label="Days Remaining" value={String(left(c.subscription_end_at))} />
         </div>
       </div>

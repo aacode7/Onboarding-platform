@@ -37,6 +37,7 @@ ACCESS_TOKEN_MINUTES = int(os.getenv('ONBOARDING_ACCESS_TOKEN_MINUTES', '15'))
 REFRESH_TOKEN_DAYS = int(os.getenv('ONBOARDING_REFRESH_TOKEN_DAYS', '7'))
 FREE_TRIAL_PLAN_ID = '2f1c0d5e-5b6e-4c38-9f76-8a7e5d2b1c40'
 TRIAL_DURATION_DAYS = int(os.getenv('ONBOARDING_TRIAL_DURATION_DAYS', '15'))
+TRIAL_START_DATE = os.getenv('ONBOARDING_TRIAL_START_DATE', '').strip()
 
 def connection(): return psycopg.connect(DATABASE_URL, row_factory=dict_row)
 
@@ -74,9 +75,14 @@ class Customer(BaseModel):
     name: str
     email: EmailStr
     product: str = 'Application'
+    project_id: str | None = None
     subscription_status: str = 'TRIAL'
     trial_start_date: datetime | None = None
+    trial_duration_days: int | None = None
     created_at: datetime | None = None
+
+class TrialUpdate(BaseModel):
+    trial_end_at: datetime
 
 class Login(BaseModel):
     email: EmailStr
@@ -89,6 +95,10 @@ class SubscriptionTokenConsumeRequest(BaseModel):
     email: EmailStr
     token: str
 
+class ProjectRegistration(BaseModel):
+    key: str
+    name: str
+
 class PlanInput(BaseModel):
     name: str
     price: float = 0
@@ -98,16 +108,23 @@ class PlanInput(BaseModel):
     features: str = ''
     product: str = ''
     popular: bool = False
+    trial_duration_days: int = 15
 
 def initialize_database():
     with closing(connection()) as conn:
         conn.execute('''CREATE TABLE IF NOT EXISTS onboarding_customers (
             id UUID PRIMARY KEY, tenant_id TEXT NOT NULL, user_id TEXT NOT NULL,
             name TEXT NOT NULL, email TEXT NOT NULL, product TEXT NOT NULL,
+            project_id UUID,
             trial_start_date TIMESTAMPTZ NOT NULL,
             created_at TIMESTAMPTZ NOT NULL)''')
+        conn.execute("ALTER TABLE onboarding_customers ADD COLUMN IF NOT EXISTS project_id UUID")
         conn.execute('ALTER TABLE onboarding_customers DROP COLUMN IF EXISTS trial_end_date')
         conn.execute('ALTER TABLE onboarding_customers DROP COLUMN IF EXISTS subscription_status')
+        conn.execute('''CREATE TABLE IF NOT EXISTS onboarding_projects (
+            id UUID PRIMARY KEY, key TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )''')
         conn.execute('''CREATE UNIQUE INDEX IF NOT EXISTS onboarding_customers_user_id_uq
             ON onboarding_customers(user_id)''')
         conn.execute('''CREATE TABLE IF NOT EXISTS subscription_plans (
@@ -119,6 +136,7 @@ def initialize_database():
         conn.execute("ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS annual_price_minor INTEGER NOT NULL DEFAULT 0")
         conn.execute("ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS product TEXT NOT NULL DEFAULT ''")
         conn.execute("ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS popular BOOLEAN NOT NULL DEFAULT FALSE")
+        conn.execute("ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS trial_duration_days INTEGER NOT NULL DEFAULT 15")
         conn.execute('''CREATE TABLE IF NOT EXISTS subscriptions (
             id UUID PRIMARY KEY, customer_id UUID NOT NULL REFERENCES onboarding_customers(id) ON DELETE CASCADE,
             plan_id UUID NOT NULL REFERENCES subscription_plans(id), status TEXT NOT NULL,
@@ -250,8 +268,10 @@ def create_customer(customer: Customer, authorization: str | None = Header(defau
     require_service(authorization)
     now = datetime.now(timezone.utc)
     customer.created_at = customer.created_at or now
-    customer.trial_start_date = customer.trial_start_date or now
-    subscription_end = now + timedelta(days=TRIAL_DURATION_DAYS)
+    customer.trial_start_date = customer.trial_start_date or (datetime.fromisoformat(TRIAL_START_DATE).replace(tzinfo=timezone.utc) if TRIAL_START_DATE else now)
+    duration_days = customer.trial_duration_days if customer.trial_duration_days is not None else TRIAL_DURATION_DAYS
+    if duration_days < 1:
+        raise HTTPException(422, 'trial_duration_days must be at least 1')
     with closing(connection()) as conn:
         existing = conn.execute(
             'SELECT id FROM onboarding_customers WHERE user_id=%s',
@@ -259,20 +279,22 @@ def create_customer(customer: Customer, authorization: str | None = Header(defau
         ).fetchone()
         customer_id = str(existing['id']) if existing else (customer.id or str(uuid4()))
         conn.execute('''INSERT INTO onboarding_customers
-            (id, tenant_id, user_id, name, email, product,
+            (id, tenant_id, user_id, name, email, product, project_id,
              trial_start_date, created_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            (VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (user_id) DO UPDATE SET tenant_id=EXCLUDED.tenant_id,
             user_id=EXCLUDED.user_id, name=EXCLUDED.name, email=EXCLUDED.email,
             product=EXCLUDED.product, trial_start_date=EXCLUDED.trial_start_date,
             created_at=EXCLUDED.created_at''',
             (customer_id, customer.tenant_id, customer.user_id, customer.name,
              customer.email, customer.product, customer.trial_start_date, customer.created_at))
-        plan = conn.execute('''SELECT id FROM subscription_plans
+        plan = conn.execute('''SELECT id, trial_duration_days FROM subscription_plans
             WHERE price_minor = 0 AND product = %s
             ORDER BY name LIMIT 1''', (customer.product,)).fetchone()
         if not plan:
             raise HTTPException(409, f'No free subscription plan configured for product {customer.product}')
+        duration_days = plan['trial_duration_days']
+        subscription_end = customer.trial_start_date + timedelta(days=duration_days)
         conn.execute('''INSERT INTO subscriptions
             (id, customer_id, plan_id, status, created_at, trial_end_at, period_end_at)
             VALUES (%s, %s, %s, 'trialing', %s, %s, %s)
@@ -308,6 +330,23 @@ def get_customer(customer_id: str, authorization: str | None = Header(default=No
         customer = conn.execute(customer_query('WHERE id=%s'), (customer_id,)).fetchone()
     if not customer: raise HTTPException(404, 'Customer not found')
     return customer
+
+@app.patch('/api/onboarding/customers/{customer_id}/trial')
+def update_customer_trial(customer_id: str, update: TrialUpdate, authorization: str | None = Header(default=None)):
+    require_admin(authorization)
+    end_at = update.trial_end_at
+    if end_at.tzinfo is None:
+        end_at = end_at.replace(tzinfo=timezone.utc)
+    if end_at <= datetime.now(timezone.utc):
+        raise HTTPException(422, 'Trial end date must be in the future')
+    with closing(connection()) as conn:
+        row = conn.execute('''UPDATE subscriptions SET trial_end_at=%s, period_end_at=%s
+            WHERE customer_id=%s AND status IN ('trialing', 'active')
+            RETURNING period_end_at''', (end_at, end_at, customer_id)).fetchone()
+        if not row:
+            raise HTTPException(404, 'Active trial not found')
+        conn.commit()
+    return {'customer_id': customer_id, 'trial_end_at': row['period_end_at']}
 
 @app.delete('/api/onboarding/customers/{customer_id}')
 def delete_customer(customer_id: str, background_tasks: BackgroundTasks, authorization: str | None = Header(default=None)):
@@ -372,7 +411,7 @@ def subscription_token_status(token: str, email: EmailStr):
 @app.get('/api/public/subscription-plans')
 def public_subscription_plans():
     with closing(connection()) as conn:
-        rows = conn.execute('''SELECT id, name, price_minor, annual_price_minor, currency, product, popular, description,
+        rows = conn.execute('''SELECT id, name, price_minor, annual_price_minor, currency, product, popular, trial_duration_days, description,
             array_to_string(entitlements, E'\n') AS features
             FROM subscription_plans WHERE product IS NOT NULL AND product <> '' ORDER BY price_minor, name''').fetchall()
     return [{**row, 'price': row.pop('price_minor') / 100, 'annual_price': row.pop('annual_price_minor') / 100} for row in rows]
@@ -382,10 +421,33 @@ def public_subscription_plans():
 def list_subscription_plans(authorization: str | None = Header(default=None)):
     require_admin_or_service(authorization)
     with closing(connection()) as conn:
-        rows = conn.execute('''SELECT id, name, price_minor, annual_price_minor, currency, product, popular, description,
+        rows = conn.execute('''SELECT id, name, price_minor, annual_price_minor, currency, product, popular, trial_duration_days, description,
             array_to_string(entitlements, E'\n') AS features, product
             FROM subscription_plans ORDER BY price_minor, name''').fetchall()
     return [{**row, 'price': row.pop('price_minor') / 100, 'annual_price': row.pop('annual_price_minor') / 100} for row in rows]
+
+@app.post('/api/projects/register')
+def register_project(project: ProjectRegistration, authorization: str | None = Header(default=None)):
+    require_service(authorization)
+    key = project.key.strip()
+    name = project.name.strip()
+    if not key or not name:
+        raise HTTPException(422, 'Project key and name are required')
+    with closing(connection()) as conn:
+        row = conn.execute('''INSERT INTO onboarding_projects (id, key, name)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (key) DO UPDATE SET name=EXCLUDED.name
+            RETURNING id, key, name, created_at''',
+            (str(uuid4()), key, name)).fetchone()
+        conn.commit()
+    return dict(row)
+
+@app.get('/api/projects')
+def list_projects(authorization: str | None = Header(default=None)):
+    require_admin_or_service(authorization)
+    with closing(connection()) as conn:
+        return conn.execute('SELECT id, key, name, created_at FROM onboarding_projects ORDER BY name').fetchall()
+
 
 @app.get('/api/subscription-products')
 def list_subscription_products(authorization: str | None = Header(default=None)):
@@ -398,16 +460,18 @@ def list_subscription_products(authorization: str | None = Header(default=None))
 @app.post('/api/subscription-plans', status_code=201)
 def create_subscription_plan(plan: PlanInput, background_tasks: BackgroundTasks, authorization: str | None = Header(default=None)):
     require_admin(authorization)
+    if plan.trial_duration_days < 1:
+        raise HTTPException(422, "trial_duration_days must be at least 1")
     plan_id = str(uuid4())
     with closing(connection()) as conn:
         if plan.popular:
             conn.execute('UPDATE subscription_plans SET popular=FALSE WHERE product=%s', (plan.product.strip(),))
         row = conn.execute('''INSERT INTO subscription_plans
-            (id, name, price_minor, annual_price_minor, currency, entitlements, description, product, popular)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-            RETURNING id, name, price_minor, annual_price_minor, currency, description, array_to_string(entitlements, E'\n') AS features, product, popular''',
+            (id, name, price_minor, annual_price_minor, currency, entitlements, description, product, popular, trial_duration_days)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id, name, price_minor, annual_price_minor, currency, description, array_to_string(entitlements, E'\n') AS features, product, popular, trial_duration_days''',
             (plan_id, plan.name.strip(), round(plan.price * 100), round(plan.annual_price * 100), plan.currency.upper(),
-             [item.strip() for item in plan.features.splitlines() if item.strip()], plan.description.strip(), plan.product.strip(), plan.popular)).fetchone()
+             [item.strip() for item in plan.features.splitlines() if item.strip()], plan.description.strip(), plan.product.strip(), plan.popular, plan.trial_duration_days)).fetchone()
         conn.commit()
     result = {**row, 'price': row.pop('price_minor') / 100, 'annual_price': row.pop('annual_price_minor') / 100}
     background_tasks.add_task(notify_reconq, 'subscription.plan.created', result)
@@ -415,17 +479,19 @@ def create_subscription_plan(plan: PlanInput, background_tasks: BackgroundTasks,
 
 @app.put('/api/subscription-plans/{plan_id}')
 def update_subscription_plan(plan_id: str, plan: PlanInput, background_tasks: BackgroundTasks, authorization: str | None = Header(default=None)):
+    if plan.trial_duration_days < 1:
+        raise HTTPException(422, "trial_duration_days must be at least 1")
     require_admin(authorization)
     with closing(connection()) as conn:
         if plan.popular:
             conn.execute('UPDATE subscription_plans SET popular=FALSE WHERE product=%s AND id<>%s', (plan.product.strip(), plan_id))
         row = conn.execute('''UPDATE subscription_plans SET name=%s, price_minor=%s,
-            annual_price_minor=%s, currency=%s, entitlements=%s, description=%s, product=%s, popular=%s WHERE id=%s
+            annual_price_minor=%s, currency=%s, entitlements=%s, description=%s, product=%s, popular=%s, trial_duration_days=%s WHERE id=%s
             RETURNING id, name, price_minor, annual_price_minor, currency, description,
-            array_to_string(entitlements, E'\n') AS features, product, popular''',
+            array_to_string(entitlements, E'\n') AS features, product, popular, trial_duration_days''',
             (plan.name.strip(), round(plan.price * 100), round(plan.annual_price * 100), plan.currency.upper(),
              [item.strip() for item in plan.features.splitlines() if item.strip()],
-             plan.description.strip(), plan.product.strip(), plan.popular, plan_id)).fetchone()
+             plan.description.strip(), plan.product.strip(), plan.popular, plan.trial_duration_days, plan_id)).fetchone()
         if not row: raise HTTPException(404, 'Subscription plan not found')
         conn.commit()
     result = {**row, 'price': row.pop('price_minor') / 100, 'annual_price': row.pop('annual_price_minor') / 100}
