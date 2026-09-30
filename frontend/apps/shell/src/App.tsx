@@ -143,7 +143,11 @@ export default function App() {
     if (!loggedIn) return;
     const load = async () => {
       let token = sessionStorage.getItem('onboarding_admin');
-      let response = await fetch('/api/onboarding/customers', {
+      const customerId = location.pathname.match(/^\/customers\/(.+)$/)?.[1];
+      const customerUrl = customerId
+        ? `/api/onboarding/customers/${encodeURIComponent(customerId)}`
+        : '/api/onboarding/customers';
+      let response = await fetch(customerUrl, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (response.status === 401) {
@@ -155,17 +159,20 @@ export default function App() {
         if (!refreshed.ok) { setLoggedIn(false); return; }
         token = (await refreshed.json()).access_token;
         sessionStorage.setItem('onboarding_admin', token!);
-        response = await fetch('/api/onboarding/customers', {
+        response = await fetch(customerUrl, {
           headers: { Authorization: `Bearer ${token}` },
         });
       }
-      if (response.ok) setRows(await response.json());
+      if (response.ok) {
+        const data = await response.json();
+        setRows(customerId ? [data] : data);
+      }
     };
     load();
     const refresh = window.setInterval(load, 10000);
     window.addEventListener('focus', load);
     return () => { window.clearInterval(refresh); window.removeEventListener('focus', load); };
-  }, [loggedIn]);
+  }, [loggedIn, location.pathname]);
   if (!loggedIn)
     return (
       <Login

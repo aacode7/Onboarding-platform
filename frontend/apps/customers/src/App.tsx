@@ -6,6 +6,7 @@ type Customer = {
   name: string;
   email: string;
   product: string;
+  business_type?: string;
   status?: string;
   subscription_status?: string;
   trial_start_date: string;
@@ -61,6 +62,7 @@ function Details({ c, onDeleted }: { c: Customer; onDeleted: (id: string) => voi
           <Info label="Customer ID" value={c.id} />
           <Info label="Tenant ID" value={c.tenant_id} />
           <Info label="Product" value={c.product} />
+          <Info label="Business Type" value={c.business_type || 'Other'} />
           <Info label="Created At" value={date(c.created_at)} />
         </div>
         <div className="card">

@@ -1,10 +1,10 @@
 {
   "latestErrorEvent": {
     "code": "TYPE-001",
-    "message": "Failed to generate type declaration. Execute the below cmd to reproduce and fix the error. #TYPE-001\nargs: {\"cmd\":\"/home/codedreamer/.nvm/versions/node/v20.20.0/bin/node /home/codedreamer/Documents/GitHub/Onboarding-platform/frontend/node_modules/typescript/bin/tsc --project /home/codedreamer/Documents/GitHub/Onboarding-platform/frontend/apps/customers/node_modules/.federation/tsconfig.abee0b7b64fd4ccdfb1b0d0574b3b5c6.json\"}\nView the docs to see how to solve: https://module-federation.io/guide/troubleshooting/type#type-001",
+    "message": "Failed to generate type declaration. Execute the below cmd to reproduce and fix the error. #TYPE-001\nargs: {\"cmd\":\"/home/codedreamer/.nvm/versions/node/v20.20.0/bin/node /home/codedreamer/Documents/GitHub/Onboarding-platform/frontend/node_modules/typescript/bin/tsc --project /home/codedreamer/Documents/GitHub/Onboarding-platform/frontend/apps/customers/node_modules/.federation/tsconfig.d9ccf78813e34a2074f75ca4a22acac3.json\"}\nView the docs to see how to solve: https://module-federation.io/guide/troubleshooting/type#type-001",
     "args": {
-      "cmd": "/home/codedreamer/.nvm/versions/node/v20.20.0/bin/node /home/codedreamer/Documents/GitHub/Onboarding-platform/frontend/node_modules/typescript/bin/tsc --project /home/codedreamer/Documents/GitHub/Onboarding-platform/frontend/apps/customers/node_modules/.federation/tsconfig.abee0b7b64fd4ccdfb1b0d0574b3b5c6.json"
+      "cmd": "/home/codedreamer/.nvm/versions/node/v20.20.0/bin/node /home/codedreamer/Documents/GitHub/Onboarding-platform/frontend/node_modules/typescript/bin/tsc --project /home/codedreamer/Documents/GitHub/Onboarding-platform/frontend/apps/customers/node_modules/.federation/tsconfig.d9ccf78813e34a2074f75ca4a22acac3.json"
     },
-    "timestamp": 1790685065103
+    "timestamp": 1790697068598
   }
 }

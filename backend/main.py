@@ -75,6 +75,7 @@ class Customer(BaseModel):
     name: str
     email: EmailStr
     product: str = 'Application'
+    business_type: str = 'Other'
     project_id: str | None = None
     subscription_status: str = 'TRIAL'
     trial_start_date: datetime | None = None
@@ -115,9 +116,11 @@ def initialize_database():
         conn.execute('''CREATE TABLE IF NOT EXISTS onboarding_customers (
             id UUID PRIMARY KEY, tenant_id TEXT NOT NULL, user_id TEXT NOT NULL,
             name TEXT NOT NULL, email TEXT NOT NULL, product TEXT NOT NULL,
+            business_type TEXT NOT NULL DEFAULT 'Other',
             project_id UUID,
             trial_start_date TIMESTAMPTZ NOT NULL,
             created_at TIMESTAMPTZ NOT NULL)''')
+        conn.execute("ALTER TABLE onboarding_customers ADD COLUMN IF NOT EXISTS business_type TEXT NOT NULL DEFAULT 'Other'")
         conn.execute("ALTER TABLE onboarding_customers ADD COLUMN IF NOT EXISTS project_id UUID")
         conn.execute('ALTER TABLE onboarding_customers DROP COLUMN IF EXISTS trial_end_date')
         conn.execute('ALTER TABLE onboarding_customers DROP COLUMN IF EXISTS subscription_status')
@@ -279,15 +282,16 @@ def create_customer(customer: Customer, authorization: str | None = Header(defau
         ).fetchone()
         customer_id = str(existing['id']) if existing else (customer.id or str(uuid4()))
         conn.execute('''INSERT INTO onboarding_customers
-            (id, tenant_id, user_id, name, email, product, project_id,
+            (id, tenant_id, user_id, name, email, product, business_type, project_id,
              trial_start_date, created_at)
-            (VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (user_id) DO UPDATE SET tenant_id=EXCLUDED.tenant_id,
             user_id=EXCLUDED.user_id, name=EXCLUDED.name, email=EXCLUDED.email,
             product=EXCLUDED.product, trial_start_date=EXCLUDED.trial_start_date,
             created_at=EXCLUDED.created_at''',
             (customer_id, customer.tenant_id, customer.user_id, customer.name,
-             customer.email, customer.product, customer.trial_start_date, customer.created_at))
+             customer.email, customer.product, customer.business_type, customer.project_id,
+             customer.trial_start_date, customer.created_at))
         plan = conn.execute('''SELECT id, trial_duration_days FROM subscription_plans
             WHERE price_minor = 0 AND product = %s
             ORDER BY name LIMIT 1''', (customer.product,)).fetchone()
@@ -319,9 +323,11 @@ def customer_query(where=''):
                {where.replace('WHERE ', 'WHERE c.')} ORDER BY c.created_at DESC'''
 
 @app.get('/api/onboarding/customers')
-def list_customers(authorization: str | None = Header(default=None)):
-    require_admin(authorization)
-    with closing(connection()) as conn: return conn.execute(customer_query()).fetchall()
+def list_customers(user_id: str | None = None, authorization: str | None = Header(default=None)):
+    require_admin_or_service(authorization)
+    with closing(connection()) as conn:
+        rows = conn.execute(customer_query('WHERE user_id=%s') if user_id else customer_query(), (user_id,) if user_id else ()).fetchall()
+    return rows
 
 @app.get('/api/onboarding/customers/{customer_id}')
 def get_customer(customer_id: str, authorization: str | None = Header(default=None)):
@@ -419,7 +425,7 @@ def public_subscription_plans():
 
 @app.get('/api/subscription-plans')
 def list_subscription_plans(authorization: str | None = Header(default=None)):
-    require_admin_or_service(authorization)
+    require_admin(authorization)
     with closing(connection()) as conn:
         rows = conn.execute('''SELECT id, name, price_minor, annual_price_minor, currency, product, popular, trial_duration_days, description,
             array_to_string(entitlements, E'\n') AS features, product
@@ -444,7 +450,7 @@ def register_project(project: ProjectRegistration, authorization: str | None = H
 
 @app.get('/api/projects')
 def list_projects(authorization: str | None = Header(default=None)):
-    require_admin_or_service(authorization)
+    require_admin(authorization)
     with closing(connection()) as conn:
         return conn.execute('SELECT id, key, name, created_at FROM onboarding_projects ORDER BY name').fetchall()
 
