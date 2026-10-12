@@ -3,3 +3,7 @@
 CREATE USER onboarding_app WITH PASSWORD 'replace-with-a-strong-password';
 CREATE DATABASE onboarding_db OWNER onboarding_app;
 GRANT ALL PRIVILEGES ON DATABASE onboarding_db TO onboarding_app;
+
+CREATE USER keycloak WITH PASSWORD 'keycloak-local-db-change-me';
+CREATE DATABASE keycloak_db OWNER keycloak;
+GRANT ALL PRIVILEGES ON DATABASE keycloak_db TO keycloak;

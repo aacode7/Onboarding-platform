@@ -35,6 +35,14 @@ ACCESS_TOKEN_SECRET = os.getenv('ONBOARDING_ACCESS_TOKEN_SECRET') or secrets.tok
 REFRESH_TOKEN_SECRET = os.getenv('ONBOARDING_REFRESH_TOKEN_SECRET') or secrets.token_urlsafe(32)
 ACCESS_TOKEN_MINUTES = int(os.getenv('ONBOARDING_ACCESS_TOKEN_MINUTES', '15'))
 REFRESH_TOKEN_DAYS = int(os.getenv('ONBOARDING_REFRESH_TOKEN_DAYS', '7'))
+KEYCLOAK_URL = os.getenv('KEYCLOAK_URL', 'http://localhost:8080')
+KEYCLOAK_REALM = os.getenv('KEYCLOAK_REALM', 'onboarding')
+KEYCLOAK_CLIENT_ID = os.getenv('KEYCLOAK_CLIENT_ID', 'onboarding-frontend')
+KEYCLOAK_ADMIN_USERNAME = os.getenv('KEYCLOAK_ADMIN_USERNAME', '')
+KEYCLOAK_ADMIN_PASSWORD = os.getenv('KEYCLOAK_ADMIN_PASSWORD', '')
+KEYCLOAK_RECONQ_REALM = os.getenv('KEYCLOAK_RECONQ_REALM', 'reconq')
+KEYCLOAK_ISSUER = f'{KEYCLOAK_URL.rstrip("/")}/realms/{KEYCLOAK_REALM}'
+KEYCLOAK_JWKS = jwt.PyJWKClient(f'{KEYCLOAK_ISSUER}/protocol/openid-connect/certs')
 FREE_TRIAL_PLAN_ID = '2f1c0d5e-5b6e-4c38-9f76-8a7e5d2b1c40'
 TRIAL_DURATION_DAYS = int(os.getenv('ONBOARDING_TRIAL_DURATION_DAYS', '15'))
 TRIAL_START_DATE = os.getenv('ONBOARDING_TRIAL_START_DATE', '').strip()
@@ -50,9 +58,39 @@ def notify_reconq(event: str, plan: dict):
             continue
         signature = hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
         try:
-            httpx.post(url, content=payload, headers={'Content-Type': 'application/json', 'X-ReconQ-Signature': signature}, timeout=5)
+            response = httpx.post(url, content=payload, headers={'Content-Type': 'application/json', 'X-ReconQ-Signature': signature}, timeout=5)
+            response.raise_for_status()
         except httpx.HTTPError:
             logging.getLogger(__name__).exception('Unable to notify %s about %s', label, event)
+
+def delete_keycloak_user(user_id: str, email: str, realm: str = KEYCLOAK_REALM):
+    if not KEYCLOAK_ADMIN_USERNAME or not KEYCLOAK_ADMIN_PASSWORD:
+        raise RuntimeError('Keycloak admin credentials are not configured')
+    token = httpx.post(f'{KEYCLOAK_URL.rstrip("/")}/realms/master/protocol/openid-connect/token', data={
+        'grant_type': 'password', 'client_id': 'admin-cli',
+        'username': KEYCLOAK_ADMIN_USERNAME, 'password': KEYCLOAK_ADMIN_PASSWORD,
+    }, timeout=10)
+    token.raise_for_status()
+    headers = {'Authorization': f'Bearer {token.json()["access_token"]}'}
+    response = httpx.delete(
+        f'{KEYCLOAK_URL.rstrip("/")}/admin/realms/{realm}/users/{user_id}',
+        headers=headers, timeout=10,
+    )
+    if response.status_code == 404:
+        users = httpx.get(
+            f'{KEYCLOAK_URL.rstrip("/")}/admin/realms/{realm}/users',
+            params={'email': email, 'exact': 'true', 'max': 20}, headers=headers, timeout=10,
+        )
+        users.raise_for_status()
+        for user in users.json():
+            if user.get('email', '').casefold() == email.casefold():
+                httpx.delete(
+                    f'{KEYCLOAK_URL.rstrip("/")}/admin/realms/{realm}/users/{user["id"]}',
+                    headers=headers, timeout=10,
+                ).raise_for_status()
+                break
+    elif response.status_code != 204:
+        response.raise_for_status()
 
 @asynccontextmanager
 async def lifespan(_app):
@@ -67,6 +105,23 @@ app.add_middleware(
     allow_headers=['*'],
 )
 logger = logging.getLogger(__name__)
+MANAGED_ROLES = {
+    'CFO', 'Finance Manager', 'Accountant', 'Reviewer', 'Administrator', 'Auditor',
+    'superadmin', 'tenant_admin', 'analyst', 'auditor', 'viewer',
+}
+ROLE_PERMISSIONS = {
+    'CFO': 'dashboard:full ingestion:view reconciliation:view review:view ledger:full journal:view journal:approve-all gl:approve-post reversal:approve books:full audit:full ai-monitoring:full settings:view entities:view admin-portal:view invoices:view payments:view purchase-orders:view credit-notes:view business-partners:view groups:view erp:view workflows:view assistant:use',
+    'Finance Manager': 'dashboard:full ingestion:run-validate reconciliation:run review:assign-resolve ledger:full journal:view books:full audit:own-entity ai-monitoring:view entities:view journal:create-submit journal:approve-500000 journal:reverse-request gl:submit invoices:view payments:view purchase-orders:view credit-notes:view business-partners:view groups:view erp:view workflows:view assistant:use',
+    'Accountant': 'dashboard:full ingestion:upload reconciliation:run-assigned review:investigate-resolve ledger:full books:full audit:own-actions ai-monitoring:view entities:view journal:create-draft invoices:view invoices:manage payments:view payments:manage purchase-orders:view credit-notes:view business-partners:view assistant:use',
+    'Reviewer': 'dashboard:full ingestion:view reconciliation:view review:review ledger:full books:full audit:own-entity ai-monitoring:view entities:view journal:approve-100000 invoices:view payments:view purchase-orders:view credit-notes:view business-partners:view assistant:use',
+    'Administrator': 'dashboard:full ingestion:configure reconciliation:configure review:view ledger:full books:full audit:full ai-monitoring:configure settings:full entities:full admin-portal:full invoices:full payments:full purchase-orders:full credit-notes:full business-partners:full groups:full erp:full workflows:full assistant:use',
+    'Auditor': 'dashboard:read-only ingestion:read-only reconciliation:read-only review:read-only ledger:read-only books:read-only audit:full ai-monitoring:read-only settings:read-only entities:read-only admin-portal:read-only invoices:view payments:view purchase-orders:view credit-notes:view business-partners:view groups:view erp:view workflows:view',
+}
+ROLE_PERMISSIONS.update({
+    'superadmin': ROLE_PERMISSIONS['Administrator'], 'tenant_admin': ROLE_PERMISSIONS['Administrator'],
+    'analyst': ROLE_PERMISSIONS['Finance Manager'], 'auditor': ROLE_PERMISSIONS['Auditor'],
+    'viewer': ROLE_PERMISSIONS['Auditor'],
+})
 
 class Customer(BaseModel):
     id: str | None = None
@@ -81,6 +136,7 @@ class Customer(BaseModel):
     trial_start_date: datetime | None = None
     trial_duration_days: int | None = None
     created_at: datetime | None = None
+    role: str = 'Administrator'
 
 class TrialUpdate(BaseModel):
     trial_end_at: datetime
@@ -118,8 +174,20 @@ def initialize_database():
             name TEXT NOT NULL, email TEXT NOT NULL, product TEXT NOT NULL,
             business_type TEXT NOT NULL DEFAULT 'Other',
             project_id UUID,
+            role TEXT NOT NULL DEFAULT 'Administrator',
             trial_start_date TIMESTAMPTZ NOT NULL,
             created_at TIMESTAMPTZ NOT NULL)''')
+        conn.execute("ALTER TABLE onboarding_customers ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'Administrator'")
+        conn.execute('''CREATE TABLE IF NOT EXISTS role_permissions (
+            role TEXT NOT NULL, permission TEXT NOT NULL,
+            PRIMARY KEY (role, permission)
+        )''')
+        for role, permissions in ROLE_PERMISSIONS.items():
+            for permission in permissions.split():
+                conn.execute(
+                    'INSERT INTO role_permissions (role, permission) VALUES (%s, %s) ON CONFLICT DO NOTHING',
+                    (role, permission),
+                )
         conn.execute("ALTER TABLE onboarding_customers ADD COLUMN IF NOT EXISTS business_type TEXT NOT NULL DEFAULT 'Other'")
         conn.execute("ALTER TABLE onboarding_customers ADD COLUMN IF NOT EXISTS project_id UUID")
         conn.execute('ALTER TABLE onboarding_customers DROP COLUMN IF EXISTS trial_end_date')
@@ -146,6 +214,26 @@ def initialize_database():
             created_at TIMESTAMPTZ NOT NULL, trial_end_at TIMESTAMPTZ,
             period_end_at TIMESTAMPTZ, canceled_at TIMESTAMPTZ
         )''')
+        conn.execute('''DELETE FROM subscriptions
+            WHERE customer_id IN (
+                SELECT id FROM (
+                    SELECT id, ROW_NUMBER() OVER (
+                        PARTITION BY lower(email) ORDER BY created_at DESC, id DESC
+                    ) AS duplicate_rank
+                    FROM onboarding_customers
+                ) duplicates WHERE duplicate_rank > 1
+            )''')
+        conn.execute('''DELETE FROM onboarding_customers
+            WHERE id IN (
+                SELECT id FROM (
+                    SELECT id, ROW_NUMBER() OVER (
+                        PARTITION BY lower(email) ORDER BY created_at DESC, id DESC
+                    ) AS duplicate_rank
+                    FROM onboarding_customers
+                ) duplicates WHERE duplicate_rank > 1
+            )''')
+        conn.execute('''CREATE UNIQUE INDEX IF NOT EXISTS onboarding_customers_email_uq
+            ON onboarding_customers(lower(email))''')
         conn.execute("ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS product TEXT NOT NULL DEFAULT ''")
         conn.execute('ALTER TABLE subscriptions DROP CONSTRAINT IF EXISTS subscriptions_plan_fk')
         conn.execute('''DO $$ BEGIN
@@ -215,10 +303,12 @@ def require_admin(authorization: str | None):
     if not authorization:
         raise HTTPException(401, 'Authentication required')
     try:
-        claims = jwt.decode(authorization.removeprefix('Bearer '), ACCESS_TOKEN_SECRET, algorithms=['HS256'])
-        if claims.get('type') != 'access': raise ValueError
+        token = authorization.removeprefix('Bearer ')
+        signing_key = KEYCLOAK_JWKS.get_signing_key_from_jwt(token).key
+        claims = jwt.decode(token, signing_key, algorithms=['RS256'], issuer=KEYCLOAK_ISSUER, options={'verify_aud': False})
+        if claims.get('azp') != KEYCLOAK_CLIENT_ID: raise ValueError
         return claims
-    except (jwt.InvalidTokenError, ValueError):
+    except Exception:
         raise HTTPException(401, 'Authentication required')
 
 def require_service(authorization: str | None):
@@ -235,36 +325,26 @@ def health(): return {'status': 'ok', 'database': 'postgresql'}
 
 @app.post('/api/admin/login')
 def login(credentials: Login):
-    with closing(connection()) as conn:
-        admin = conn.execute('SELECT password_hash, password_salt FROM admin_users WHERE email=%s', (credentials.email,)).fetchone()
-    if not admin or not hmac.compare_digest(hash_password(credentials.password, admin['password_salt']), admin['password_hash']):
+    response = httpx.post(f'{KEYCLOAK_ISSUER}/protocol/openid-connect/token', data={
+        'grant_type': 'password', 'client_id': KEYCLOAK_CLIENT_ID,
+        'username': credentials.email, 'password': credentials.password,
+    }, timeout=10)
+    if response.status_code != 200:
         raise HTTPException(401, 'Invalid email or password')
-    now = datetime.now(timezone.utc)
-    access_token = jwt.encode(
-        {'sub': credentials.email, 'type': 'access', 'exp': now + timedelta(minutes=ACCESS_TOKEN_MINUTES)},
-        ACCESS_TOKEN_SECRET, algorithm='HS256')
-    refresh_token = jwt.encode(
-        {'sub': credentials.email, 'type': 'refresh', 'exp': now + timedelta(days=REFRESH_TOKEN_DAYS)},
-        REFRESH_TOKEN_SECRET, algorithm='HS256')
-    return {'access_token': access_token, 'refresh_token': refresh_token,
-            'token_type': 'bearer', 'expires_in': ACCESS_TOKEN_MINUTES * 60}
+    return response.json()
 
 class Refresh(BaseModel):
     refresh_token: str
 
 @app.post('/api/admin/refresh')
 def refresh(credentials: Refresh):
-    try:
-        claims = jwt.decode(credentials.refresh_token, REFRESH_TOKEN_SECRET, algorithms=['HS256'])
-        if claims.get('type') != 'refresh': raise ValueError
-    except (jwt.InvalidTokenError, ValueError):
+    response = httpx.post(f'{KEYCLOAK_ISSUER}/protocol/openid-connect/token', data={
+        'grant_type': 'refresh_token', 'client_id': KEYCLOAK_CLIENT_ID,
+        'refresh_token': credentials.refresh_token,
+    }, timeout=10)
+    if response.status_code != 200:
         raise HTTPException(401, 'Invalid refresh token')
-    now = datetime.now(timezone.utc)
-    access_token = jwt.encode(
-        {'sub': claims['sub'], 'type': 'access', 'exp': now + timedelta(minutes=ACCESS_TOKEN_MINUTES)},
-        ACCESS_TOKEN_SECRET, algorithm='HS256')
-    return {'access_token': access_token, 'token_type': 'bearer',
-            'expires_in': ACCESS_TOKEN_MINUTES * 60}
+    return response.json()
 
 @app.post('/api/onboarding/customers', status_code=201)
 def create_customer(customer: Customer, authorization: str | None = Header(default=None)):
@@ -280,18 +360,24 @@ def create_customer(customer: Customer, authorization: str | None = Header(defau
             'SELECT id FROM onboarding_customers WHERE user_id=%s',
             (customer.user_id,),
         ).fetchone()
+        duplicate = conn.execute(
+            'SELECT id FROM onboarding_customers WHERE lower(email)=lower(%s) AND user_id<>%s',
+            (customer.email, customer.user_id),
+        ).fetchone()
+        if duplicate:
+            raise HTTPException(409, 'A customer with this email already exists')
         customer_id = str(existing['id']) if existing else (customer.id or str(uuid4()))
         conn.execute('''INSERT INTO onboarding_customers
             (id, tenant_id, user_id, name, email, product, business_type, project_id,
-             trial_start_date, created_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+             role, trial_start_date, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (user_id) DO UPDATE SET tenant_id=EXCLUDED.tenant_id,
             user_id=EXCLUDED.user_id, name=EXCLUDED.name, email=EXCLUDED.email,
-            product=EXCLUDED.product, trial_start_date=EXCLUDED.trial_start_date,
+            product=EXCLUDED.product, role=EXCLUDED.role, trial_start_date=EXCLUDED.trial_start_date,
             created_at=EXCLUDED.created_at''',
             (customer_id, customer.tenant_id, customer.user_id, customer.name,
              customer.email, customer.product, customer.business_type, customer.project_id,
-             customer.trial_start_date, customer.created_at))
+             customer.role, customer.trial_start_date, customer.created_at))
         plan = conn.execute('''SELECT id, trial_duration_days FROM subscription_plans
             WHERE price_minor = 0 AND product = %s
             ORDER BY name LIMIT 1''', (customer.product,)).fetchone()
@@ -308,6 +394,48 @@ def create_customer(customer: Customer, authorization: str | None = Header(defau
         conn.commit()
     customer.id = customer_id
     return {'customer': customer}
+
+@app.get('/api/authorization/{user_id}')
+def get_authorization(user_id: str, authorization: str | None = Header(default=None)):
+    """Return the central role and subscription state for ReconQ service calls."""
+    require_service(authorization)
+    with closing(connection()) as conn:
+        row = conn.execute('''SELECT c.user_id, c.tenant_id, c.role,
+            CASE WHEN s.status = 'expired' OR s.period_end_at < NOW()
+                 THEN 'EXPIRED' ELSE COALESCE(s.status, 'trialing') END AS status
+            FROM onboarding_customers c
+            LEFT JOIN LATERAL (
+                SELECT status, period_end_at FROM subscriptions
+                WHERE customer_id = c.id ORDER BY created_at DESC LIMIT 1
+            ) s ON TRUE
+            WHERE c.user_id = %s''', (user_id,)).fetchone()
+    if not row:
+        raise HTTPException(404, 'Authorization record not found')
+    with closing(connection()) as conn:
+        permissions = conn.execute(
+            'SELECT permission FROM role_permissions WHERE role=%s ORDER BY permission',
+            (row['role'],),
+        ).fetchall()
+    result = dict(row)
+    result['permissions'] = [item['permission'] for item in permissions]
+    return result
+
+@app.patch('/api/authorization/{user_id}/role')
+def update_authorization_role(user_id: str, payload: dict, authorization: str | None = Header(default=None)):
+    """Update a role from a trusted ReconQ service call."""
+    require_service(authorization)
+    role = payload.get('role')
+    if role not in MANAGED_ROLES:
+        raise HTTPException(422, 'Unsupported role')
+    with closing(connection()) as conn:
+        row = conn.execute(
+            'UPDATE onboarding_customers SET role=%s WHERE user_id=%s RETURNING user_id, tenant_id, role',
+            (role, user_id),
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, 'Authorization record not found')
+        conn.commit()
+    return dict(row)
 
 def customer_query(where=''):
     return f'''SELECT c.*, s.period_end_at AS subscription_end_at, CASE
@@ -360,10 +488,12 @@ def delete_customer(customer_id: str, background_tasks: BackgroundTasks, authori
     with closing(connection()) as conn:
         customer = conn.execute('SELECT id, tenant_id, user_id, email FROM onboarding_customers WHERE id=%s', (customer_id,)).fetchone()
         if not customer: raise HTTPException(404, 'Customer not found')
+        delete_keycloak_user(customer['user_id'], customer['email'])
+        delete_keycloak_user(customer['user_id'], customer['email'], KEYCLOAK_RECONQ_REALM)
+        notify_reconq('customer.deleted', dict(customer))
         conn.execute('DELETE FROM subscriptions WHERE customer_id=%s', (customer_id,))
         conn.execute('DELETE FROM onboarding_customers WHERE id=%s', (customer_id,))
         conn.commit()
-    background_tasks.add_task(notify_reconq, 'customer.deleted', dict(customer))
     return {'deleted': True, 'id': customer_id}
 
 @app.get('/api/subscription-entitlements/{customer_id}/{key}')

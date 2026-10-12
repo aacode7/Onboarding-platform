@@ -11,13 +11,25 @@ export default function Subscriptions() {
   const [selectedProduct, setSelectedProduct] = useState<string>('');
   const [featureRows, setFeatureRows] = useState<string[]>(['']);
   const [freePlanPreset, setFreePlanPreset] = useState(false);
-  const token = sessionStorage.getItem('onboarding_admin');
-  const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+  const headers = () => ({ Authorization: `Bearer ${sessionStorage.getItem('onboarding_admin')}`, 'Content-Type': 'application/json' });
+  const request = async (url: string, options: RequestInit = {}) => {
+    let response = await fetch(url, { ...options, headers: { ...headers(), ...options.headers } });
+    if (response.status !== 401) return response;
+    const refreshed = await fetch('/api/admin/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: sessionStorage.getItem('onboarding_refresh') }),
+    });
+    if (!refreshed.ok) return response;
+    const { access_token } = await refreshed.json();
+    sessionStorage.setItem('onboarding_admin', access_token);
+    return fetch(url, { ...options, headers: { ...headers(), ...options.headers } });
+  };
   const projectNames = [...new Set([...products, ...plans.map((plan) => plan.product).filter((product) => product && product !== 'Application')])];
 
   useEffect(() => {
-    fetch('/api/projects', { headers }).then((response) => response.ok ? response.json() : Promise.reject()).then((items: Array<{ name: string }>) => setProducts(items.map((item) => item.name))).catch(() => setError('Unable to load projects'));
-    fetch('/api/subscription-plans', { headers })
+    request('/api/projects').then((response) => response.ok ? response.json() : Promise.reject()).then((items: Array<{ name: string }>) => setProducts(items.map((item) => item.name))).catch(() => setError('Unable to load projects'));
+    request('/api/subscription-plans')
       .then((response) => response.ok ? response.json() : Promise.reject())
       .then(setPlans)
       .catch(() => setError('Unable to load subscription plans'));
@@ -25,7 +37,7 @@ export default function Subscriptions() {
 
   const deletePlan = async (plan: Plan) => {
     if (!window.confirm(`Delete the ${plan.name} plan permanently?`)) return;
-    const response = await fetch(`/api/subscription-plans/${plan.id}`, { method: 'DELETE', headers });
+    const response = await request(`/api/subscription-plans/${plan.id}`, { method: 'DELETE' });
     if (!response.ok) { setError((await response.json()).detail || 'Unable to delete subscription plan'); return; }
     setPlans((current) => current.filter((item) => item.id !== plan.id));
   };
@@ -64,7 +76,7 @@ export default function Subscriptions() {
             popular: data.get('popular') === 'on',
             trial_duration_days: Number(data.get('trial_duration_days')),
           };
-          fetch(editing ? `/api/subscription-plans/${editing.id}` : '/api/subscription-plans', { method: editing ? 'PUT' : 'POST', headers, body: JSON.stringify(payload) }).then((response) => response.ok ? response.json() : Promise.reject())
+          request(editing ? `/api/subscription-plans/${editing.id}` : '/api/subscription-plans', { method: editing ? 'PUT' : 'POST', body: JSON.stringify(payload) }).then((response) => response.ok ? response.json() : Promise.reject())
             .then((plan) => setPlans((current) => editing ? current.map((item) => item.id === plan.id ? plan : item) : [...current, plan]))
             .catch(() => setError('Unable to save subscription plan'));
           event.currentTarget.reset();

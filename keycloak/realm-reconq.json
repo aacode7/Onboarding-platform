@@ -1,0 +1,46 @@
+{
+  "realm": "onboarding",
+  "enabled": true,
+  "accessTokenLifespan": 900,
+  "ssoSessionIdleTimeout": 604800,
+  "ssoSessionMaxLifespan": 604800,
+  "clientSessionIdleTimeout": 604800,
+  "clientSessionMaxLifespan": 604800,
+  "registrationAllowed": true,
+  "registrationEmailAsUsername": true,
+  "rememberMe": true,
+  "verifyEmail": true,
+  "resetPasswordAllowed": true,
+  "clients": [
+    {
+      "clientId": "onboarding-frontend",
+      "name": "Onboarding Frontend",
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "directAccessGrantsEnabled": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": ["http://localhost:3001/*"],
+      "webOrigins": ["http://localhost:3001"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      }
+    }
+  ],
+  "users": [
+    {
+      "username": "admin@onboard.com",
+      "email": "admin@onboard.com",
+      "emailVerified": true,
+      "enabled": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Onboard@321",
+          "temporary": false
+        }
+      ]
+    }
+  ]
+}

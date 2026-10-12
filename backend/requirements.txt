@@ -4,4 +4,5 @@ pydantic[email]==2.*
 psycopg[binary]==3.*
 httpx==0.28.*
 PyJWT==2.*
+cryptography==44.*
 git+ssh://git@github.com/aacode7/subscription-engine.git

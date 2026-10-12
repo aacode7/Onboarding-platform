@@ -1,0 +1,36 @@
+{
+  "realm": "reconq",
+  "enabled": true,
+  "registrationAllowed": true,
+  "registrationEmailAsUsername": true,
+  "rememberMe": true,
+  "verifyEmail": true,
+  "resetPasswordAllowed": true,
+  "roles": {
+    "realm": [
+      { "name": "CFO", "description": "Full finance visibility and approval authority" },
+      { "name": "Finance Manager", "description": "Runs reconciliation and submits journals" },
+      { "name": "Accountant", "description": "Uploads data and prepares draft journals" },
+      { "name": "Reviewer", "description": "Reviews exceptions and approves within threshold" },
+      { "name": "Administrator", "description": "Manages users, entities, configuration, and access" },
+      { "name": "Auditor", "description": "Read-only access with full audit visibility" }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "reconq-frontend",
+      "name": "ReconQ Frontend",
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "directAccessGrantsEnabled": false,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": ["http://localhost:3000/*"],
+      "webOrigins": ["http://localhost:3000"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      }
+    }
+  ]
+}

@@ -17,27 +17,17 @@ type Customer = {
   created_at: string;
 };
 
-function Login({
-  onLogin,
-}: {
-  onLogin: (email: string, password: string) => Promise<string | undefined>;
-}) {
+function Login({ onLogin }: { onLogin: (email: string, password: string) => Promise<string | undefined> }) {
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   return (
     <div className="login-page">
-      <form
-        className="login-card"
-        onSubmit={async (e) => {
-          e.preventDefault();
-          try {
-            const form = new FormData(e.currentTarget);
-            setError((await onLogin(String(form.get('email')), String(form.get('password')))) || '');
-          } catch {
-            setError('Unable to reach the server');
-          }
-        }}
-      >
+      <form className="login-card" onSubmit={async (e) => {
+        e.preventDefault();
+        const form = new FormData(e.currentTarget);
+        try { setError((await onLogin(String(form.get('email')), String(form.get('password')))) || ''); }
+        catch { setError('Unable to reach the server'); }
+      }}>
         <div className="brand login-brand">
           <span className="brand-mark">OP</span>
           <div>
@@ -47,42 +37,10 @@ function Login({
         </div>
         <h1>Welcome back</h1>
         <p className="muted">Sign in to manage onboarded customers.</p>
-        <label>
-          Email
-          <input name="email" type="email" required placeholder="admin@reconq.com" />
-        </label>
-        <label>
-          Password
-          <span className="password-field">
-            <input
-              name="password"
-              type={showPassword ? 'text' : 'password'}
-              required
-              placeholder="••••••••"
-            />
-            <button
-              type="button"
-              className="password-toggle"
-              onClick={() => setShowPassword((visible) => !visible)}
-              aria-label={showPassword ? 'Hide password' : 'Show password'}
-            >
-              {showPassword ? (
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M3 3l18 18M10.6 10.6a2 2 0 0 0 2.8 2.8M9.9 5.1A10.8 10.8 0 0 1 12 4.9c5.2 0 9.2 4.6 10 7.1a12.8 12.8 0 0 1-3.1 4.8M6.2 6.2C3.9 7.8 2.4 10.2 2 12c.8 2.5 4.8 7.1 10 7.1 1 0 2-.2 2.9-.5" />
-                </svg>
-              ) : (
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z" />
-                  <circle cx="12" cy="12" r="2.5" />
-                </svg>
-              )}
-            </button>
-          </span>
-        </label>
+        <label>Email<input name="email" type="email" required placeholder="admin@reconq.com" /></label>
+        <label>Password<span className="password-field"><input name="password" type={showPassword ? 'text' : 'password'} required placeholder="••••••••" /><button type="button" className="password-toggle" onClick={() => setShowPassword((visible) => !visible)}>{showPassword ? 'Hide' : 'Show'}</button></span></label>
         {error && <p className="error">{error}</p>}
-        <button className="primary full" type="submit">
-          Log in
-        </button>
+        <button className="primary full" type="submit">Log in</button>
       </form>
     </div>
   );
@@ -135,9 +93,7 @@ function Layout({ children, onLogout }: { children: React.ReactNode; onLogout: (
 export default function App() {
   const location = useLocation();
   const navigate = useNavigate();
-  const [loggedIn, setLoggedIn] = useState(() =>
-    Boolean(sessionStorage.getItem('onboarding_admin')),
-  );
+  const [loggedIn, setLoggedIn] = useState(() => Boolean(sessionStorage.getItem('onboarding_admin')));
   const [rows, setRows] = useState<Customer[]>([]);
   useEffect(() => {
     if (!loggedIn) return;
@@ -152,10 +108,7 @@ export default function App() {
       });
       if (response.status === 401) {
         const refreshToken = sessionStorage.getItem('onboarding_refresh');
-        const refreshed = await fetch('/api/admin/refresh', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ refresh_token: refreshToken }),
-        });
+        const refreshed = await fetch('/api/admin/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ refresh_token: refreshToken }) });
         if (!refreshed.ok) { setLoggedIn(false); return; }
         token = (await refreshed.json()).access_token;
         sessionStorage.setItem('onboarding_admin', token!);
@@ -177,11 +130,7 @@ export default function App() {
     return (
       <Login
         onLogin={async (email, password) => {
-          const response = await fetch('/api/admin/login', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email, password }),
-          });
+          const response = await fetch('/api/admin/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
           if (!response.ok) return 'Invalid email or password';
           const { access_token, refresh_token } = await response.json();
           sessionStorage.setItem('onboarding_admin', access_token);

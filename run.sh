@@ -12,8 +12,8 @@ set -a
 source backend/.env
 set +a
 
-if [[ -z "${POSTGRES_PASSWORD:-}" || -z "${ONBOARDING_API_KEY:-}" ]]; then
-  echo "backend/.env must define POSTGRES_PASSWORD and ONBOARDING_API_KEY."
+if [[ -z "${POSTGRES_PASSWORD:-}" || -z "${ONBOARDING_API_KEY:-}" || -z "${KEYCLOAK_ADMIN_USERNAME:-}" || -z "${KEYCLOAK_ADMIN_PASSWORD:-}" ]]; then
+  echo "backend/.env must define POSTGRES_PASSWORD, ONBOARDING_API_KEY, KEYCLOAK_ADMIN_USERNAME, and KEYCLOAK_ADMIN_PASSWORD."
   exit 1
 fi
 
@@ -32,6 +32,21 @@ echo "Starting the Onboarding Platform..."
 docker compose down --remove-orphans >/dev/null 2>&1 || true
 docker compose build --no-cache
 docker compose up --force-recreate --remove-orphans -d
+
+echo "Waiting for Keycloak..."
+for second in {1..60}; do
+  echo "  Keycloak check ${second}/60..."
+  if curl --silent --fail http://127.0.0.1:8080/ >/dev/null; then
+    echo "✓ Keycloak is running at http://127.0.0.1:8080"
+    break
+  fi
+  sleep 1
+done
+
+if ! curl --silent --fail http://127.0.0.1:8080/ >/dev/null; then
+  echo "✗ Keycloak did not become available. Check: docker compose logs keycloak"
+  exit 1
+fi
 
 echo "Waiting for the subscription scheduler..."
 for _ in {1..30}; do
