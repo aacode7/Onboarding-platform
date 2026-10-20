@@ -147,8 +147,48 @@ header input {
 }
 .content {
   padding: 32px 40px;
-  max-width: 1500px;
+  width: 100%;
 }
+.status-pill { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; border: 1px solid #ccebe5; border-radius: 999px; background: #effcf8; color: #08777a; font-size: 12px; font-weight: 700; }
+.guardrail-card { overflow: hidden; background: #fff; border: 1px solid #dfe8ed; border-radius: 12px; box-shadow: 0 12px 30px rgba(15, 42, 55, .06); }
+.guardrail-toolbar { display: grid; grid-template-columns: minmax(230px, 1fr) minmax(190px, .7fr) minmax(220px, 1fr); gap: 20px; align-items: end; padding: 24px; background: linear-gradient(135deg, #f7fbfc, #fff); border-bottom: 1px solid #e8eff2; }
+.guardrail-toolbar label, .guardrail-field { color: #344c5b; font-size: 12px; font-weight: 700; }
+.guardrail-toolbar label > span, .guardrail-field > span { display: block; margin-bottom: 8px; }
+.guardrail-toolbar select { width: 100%; padding: 11px 12px; border: 1px solid #cfdde4; border-radius: 8px; background: #fff; color: #153241; font: inherit; }
+.guardrail-help { padding: 10px 14px; border-left: 3px solid #18a999; }
+.guardrail-help strong, .guardrail-help small { display: block; }
+.guardrail-help strong { color: #153241; font-size: 12px; }
+.guardrail-help small { margin-top: 4px; color: #718493; font-size: 11px; font-weight: 400; }
+.project-context span, .project-context small { display: block; color: #718493; font-size: 11px; }
+.project-context strong { display: block; margin: 4px 0; color: #153241; font-size: 18px; }
+.scope-summary span, .scope-summary small { display: block; color: #718493; font-size: 11px; }
+.scope-summary strong { display: block; margin: 4px 0; color: #153241; font-size: 14px; }
+.guardrail-section { padding: 22px 24px 4px; }
+.section-heading { display: flex; justify-content: space-between; align-items: center; padding-bottom: 12px; border-bottom: 1px solid #edf2f4; }
+.section-heading h2 { margin: 0; color: #153241; font-size: 14px; }
+.section-heading span { color: #91a0aa; font-size: 10px; font-weight: 700; letter-spacing: .7px; text-transform: uppercase; }
+.guardrail-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px 24px; padding: 18px 0 12px; }
+.guardrail-field { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-weight: 600; }
+.limit-input { display: flex; align-items: center; gap: 7px; }
+.limit-input input { width: 104px; padding: 9px 10px; border: 1px solid #cfdae0; border-radius: 7px; background: #fbfdfe; color: #153241; font: 600 13px/1 inherit; outline: none; }
+.limit-input input:focus { border-color: #0d9b91; box-shadow: 0 0 0 3px rgba(13, 155, 145, .12); }
+.limit-input small { color: #90a0aa; font-size: 10px; white-space: nowrap; }
+.limit-input > input[type="checkbox"] { appearance: none; width: 40px; height: 22px; margin: 0; border-radius: 999px; background: #cbd5dc; position: relative; cursor: pointer; transition: background .2s; }
+.limit-input > input[type="checkbox"]::after { content: ''; position: absolute; width: 16px; height: 16px; top: 3px; left: 3px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px #0003; transition: transform .2s; }
+.limit-input > input[type="checkbox"]:checked { background: #0b8f83; }
+.limit-input > input[type="checkbox"]:checked::after { transform: translateX(18px); }
+.toggle { display: inline-flex; align-items: center; gap: 8px; padding: 0; border: 0; background: transparent; color: #90a0aa; font: inherit; font-size: 10px; font-weight: 700; cursor: pointer; }
+.toggle.on { color: #08777a; }
+.toggle-input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.toggle-track { display: inline-flex; align-items: center; width: 40px; height: 22px; padding: 3px; border-radius: 999px; background: #cbd5dc; transition: background .2s; cursor: pointer; }
+.toggle.on .toggle-track { background: #0b8f83; }
+.toggle-knob { width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px #0003; transition: transform .2s; }
+.toggle.on .toggle-knob { transform: translateX(18px); }
+.guardrail-footer { display: flex; align-items: center; justify-content: flex-end; gap: 18px; min-height: 72px; margin-top: 8px; padding: 14px 24px; background: #fbfcfd; border-top: 1px solid #e8eff2; }
+.guardrail-footer .error, .guardrail-footer .success { margin: 0 auto 0 0; }
+.save-guardrails { padding: 11px 18px; border: 0; border-radius: 8px; cursor: pointer; font-weight: 700; }
+@media (max-width: 900px) { .guardrail-grid { grid-template-columns: 1fr; } }
+@media (max-width: 760px) { .guardrail-toolbar { grid-template-columns: 1fr; } .guardrail-field { align-items: flex-start; flex-direction: column; gap: 4px; } }
 .login-page {
   min-height: 100vh;
   display: grid;

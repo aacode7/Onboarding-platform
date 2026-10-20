@@ -6,7 +6,8 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends git openssh-client ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 RUN mkdir -p -m 0700 /root/.ssh \
-    && ssh-keyscan github.com >> /root/.ssh/known_hosts
+    && ssh-keyscan github.com >> /root/.ssh/known_hosts || true
+RUN git config --global core.sshCommand "ssh -o StrictHostKeyChecking=accept-new"
 COPY backend/requirements.txt ./requirements.txt
 RUN --mount=type=ssh python -m venv /venv \
     && /venv/bin/pip install --no-cache-dir -r requirements.txt

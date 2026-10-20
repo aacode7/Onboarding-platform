@@ -1,0 +1,33 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>com.reconq</groupId><artifactId>workspace-login</artifactId><version>1.0.0</version>
+  <properties><keycloak.version>26.8.0</keycloak.version><maven.compiler.release>17</maven.compiler.release></properties>
+  <dependencies>
+    <dependency><groupId>org.keycloak</groupId><artifactId>keycloak-server-spi</artifactId><version>${keycloak.version}</version><scope>provided</scope></dependency>
+    <dependency><groupId>org.keycloak</groupId><artifactId>keycloak-server-spi-private</artifactId><version>${keycloak.version}</version><scope>provided</scope></dependency>
+    <dependency><groupId>org.keycloak</groupId><artifactId>keycloak-services</artifactId><version>${keycloak.version}</version><scope>provided</scope></dependency>
+    <dependency><groupId>org.json</groupId><artifactId>json</artifactId><version>20250517</version></dependency>
+  </dependencies>
+  <build><plugins>
+    <plugin>
+      <groupId>org.apache.maven.plugins</groupId>
+      <artifactId>maven-compiler-plugin</artifactId>
+      <version>3.13.0</version>
+    </plugin>
+    <plugin>
+      <groupId>org.apache.maven.plugins</groupId>
+      <artifactId>maven-shade-plugin</artifactId>
+      <version>3.6.0</version>
+      <executions>
+        <execution>
+          <phase>package</phase>
+          <goals><goal>shade</goal></goals>
+          <configuration>
+            <createDependencyReducedPom>false</createDependencyReducedPom>
+            <shadedArtifactAttached>false</shadedArtifactAttached>
+          </configuration>
+        </execution>
+      </executions>
+    </plugin>
+  </plugins></build>
+</project>

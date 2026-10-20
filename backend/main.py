@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import re
 import secrets
+import json
 from contextlib import closing, asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
@@ -41,10 +42,11 @@ KEYCLOAK_CLIENT_ID = os.getenv('KEYCLOAK_CLIENT_ID', 'onboarding-frontend')
 KEYCLOAK_ADMIN_USERNAME = os.getenv('KEYCLOAK_ADMIN_USERNAME', '')
 KEYCLOAK_ADMIN_PASSWORD = os.getenv('KEYCLOAK_ADMIN_PASSWORD', '')
 KEYCLOAK_RECONQ_REALM = os.getenv('KEYCLOAK_RECONQ_REALM', 'reconq')
+RECONQ_AUTH_URL = os.getenv('RECONQ_AUTH_URL', 'http://localhost:3000/login')
 KEYCLOAK_ISSUER = f'{KEYCLOAK_URL.rstrip("/")}/realms/{KEYCLOAK_REALM}'
 KEYCLOAK_JWKS = jwt.PyJWKClient(f'{KEYCLOAK_ISSUER}/protocol/openid-connect/certs')
 FREE_TRIAL_PLAN_ID = '2f1c0d5e-5b6e-4c38-9f76-8a7e5d2b1c40'
-TRIAL_DURATION_DAYS = int(os.getenv('ONBOARDING_TRIAL_DURATION_DAYS', '15'))
+PLAN_DURATION_DAYS = int(os.environ['PLAN_DURATION_DAYS'])
 TRIAL_START_DATE = os.getenv('ONBOARDING_TRIAL_START_DATE', '').strip()
 
 def connection(): return psycopg.connect(DATABASE_URL, row_factory=dict_row)
@@ -55,6 +57,8 @@ def notify_reconq(event: str, plan: dict):
     targets = [('ReconQ', RECONQ_WEBHOOK_URL, RECONQ_WEBHOOK_SECRET)] if event == 'customer.deleted' else [('ReconQ', RECONQ_WEBHOOK_URL, RECONQ_WEBHOOK_SECRET), ('IntellQ', INTELLQ_WEBHOOK_URL, INTELLQ_WEBHOOK_SECRET)]
     for label, url, secret in targets:
         if not url or not secret:
+            if event == 'customer.deleted' and label == 'ReconQ':
+                raise RuntimeError('RECONQ_WEBHOOK_URL and RECONQ_WEBHOOK_SECRET are required for customer deletion')
             continue
         signature = hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
         try:
@@ -62,6 +66,8 @@ def notify_reconq(event: str, plan: dict):
             response.raise_for_status()
         except httpx.HTTPError:
             logging.getLogger(__name__).exception('Unable to notify %s about %s', label, event)
+            if event == 'customer.deleted' and label == 'ReconQ':
+                raise
 
 def delete_keycloak_user(user_id: str, email: str, realm: str = KEYCLOAK_REALM):
     if not KEYCLOAK_ADMIN_USERNAME or not KEYCLOAK_ADMIN_PASSWORD:
@@ -92,6 +98,24 @@ def delete_keycloak_user(user_id: str, email: str, realm: str = KEYCLOAK_REALM):
     elif response.status_code != 204:
         response.raise_for_status()
 
+def delete_keycloak_group(tenant_id: str, realm: str):
+    if not KEYCLOAK_ADMIN_USERNAME or not KEYCLOAK_ADMIN_PASSWORD:
+        raise RuntimeError('Keycloak admin credentials are not configured')
+    token = httpx.post(f'{KEYCLOAK_URL.rstrip("/")}/realms/master/protocol/openid-connect/token', data={
+        'grant_type': 'password', 'client_id': 'admin-cli',
+        'username': KEYCLOAK_ADMIN_USERNAME, 'password': KEYCLOAK_ADMIN_PASSWORD,
+    }, timeout=10)
+    token.raise_for_status()
+    headers = {'Authorization': f'Bearer {token.json()["access_token"]}'}
+    base = f'{KEYCLOAK_URL.rstrip("/")}/admin/realms/{realm}'
+    groups = httpx.get(f'{base}/groups', params={'search': f'tenant-{tenant_id}'}, headers=headers, timeout=10)
+    groups.raise_for_status()
+    for group in groups.json():
+        if group.get('name') == f'tenant-{tenant_id}':
+            response = httpx.delete(f'{base}/groups/{group["id"]}', headers=headers, timeout=10)
+            if response.status_code not in (204, 404):
+                response.raise_for_status()
+
 @asynccontextmanager
 async def lifespan(_app):
     initialize_database_with_retry()
@@ -109,20 +133,6 @@ MANAGED_ROLES = {
     'CFO', 'Finance Manager', 'Accountant', 'Reviewer', 'Administrator', 'Auditor',
     'superadmin', 'tenant_admin', 'analyst', 'auditor', 'viewer',
 }
-ROLE_PERMISSIONS = {
-    'CFO': 'dashboard:full ingestion:view reconciliation:view review:view ledger:full journal:view journal:approve-all gl:approve-post reversal:approve books:full audit:full ai-monitoring:full settings:view entities:view admin-portal:view invoices:view payments:view purchase-orders:view credit-notes:view business-partners:view groups:view erp:view workflows:view assistant:use',
-    'Finance Manager': 'dashboard:full ingestion:run-validate reconciliation:run review:assign-resolve ledger:full journal:view books:full audit:own-entity ai-monitoring:view entities:view journal:create-submit journal:approve-500000 journal:reverse-request gl:submit invoices:view payments:view purchase-orders:view credit-notes:view business-partners:view groups:view erp:view workflows:view assistant:use',
-    'Accountant': 'dashboard:full ingestion:upload reconciliation:run-assigned review:investigate-resolve ledger:full books:full audit:own-actions ai-monitoring:view entities:view journal:create-draft invoices:view invoices:manage payments:view payments:manage purchase-orders:view credit-notes:view business-partners:view assistant:use',
-    'Reviewer': 'dashboard:full ingestion:view reconciliation:view review:review ledger:full books:full audit:own-entity ai-monitoring:view entities:view journal:approve-100000 invoices:view payments:view purchase-orders:view credit-notes:view business-partners:view assistant:use',
-    'Administrator': 'dashboard:full ingestion:configure reconciliation:configure review:view ledger:full books:full audit:full ai-monitoring:configure settings:full entities:full admin-portal:full invoices:full payments:full purchase-orders:full credit-notes:full business-partners:full groups:full erp:full workflows:full assistant:use',
-    'Auditor': 'dashboard:read-only ingestion:read-only reconciliation:read-only review:read-only ledger:read-only books:read-only audit:full ai-monitoring:read-only settings:read-only entities:read-only admin-portal:read-only invoices:view payments:view purchase-orders:view credit-notes:view business-partners:view groups:view erp:view workflows:view',
-}
-ROLE_PERMISSIONS.update({
-    'superadmin': ROLE_PERMISSIONS['Administrator'], 'tenant_admin': ROLE_PERMISSIONS['Administrator'],
-    'analyst': ROLE_PERMISSIONS['Finance Manager'], 'auditor': ROLE_PERMISSIONS['Auditor'],
-    'viewer': ROLE_PERMISSIONS['Auditor'],
-})
-
 class Customer(BaseModel):
     id: str | None = None
     tenant_id: str
@@ -133,8 +143,9 @@ class Customer(BaseModel):
     business_type: str = 'Other'
     project_id: str | None = None
     subscription_status: str = 'TRIAL'
+    plan_name: str | None = None
     trial_start_date: datetime | None = None
-    trial_duration_days: int | None = None
+    plan_duration_days: int | None = None
     created_at: datetime | None = None
     role: str = 'Administrator'
 
@@ -145,11 +156,12 @@ class Login(BaseModel):
     email: EmailStr
     password: str
 
-class SubscriptionTokenRequest(BaseModel):
+class WorkspaceAccessTokenRequest(BaseModel):
     email: EmailStr
-    plan: str = "Free Trial"
-class SubscriptionTokenConsumeRequest(BaseModel):
-    email: EmailStr
+    user_id: str
+    tenant_id: str
+
+class WorkspaceAccessTokenConsumeRequest(BaseModel):
     token: str
 
 class ProjectRegistration(BaseModel):
@@ -165,7 +177,7 @@ class PlanInput(BaseModel):
     features: str = ''
     product: str = ''
     popular: bool = False
-    trial_duration_days: int = 15
+    plan_duration_days: int = 15
 
 def initialize_database():
     with closing(connection()) as conn:
@@ -178,18 +190,11 @@ def initialize_database():
             trial_start_date TIMESTAMPTZ NOT NULL,
             created_at TIMESTAMPTZ NOT NULL)''')
         conn.execute("ALTER TABLE onboarding_customers ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'Administrator'")
-        conn.execute('''CREATE TABLE IF NOT EXISTS role_permissions (
-            role TEXT NOT NULL, permission TEXT NOT NULL,
-            PRIMARY KEY (role, permission)
-        )''')
-        for role, permissions in ROLE_PERMISSIONS.items():
-            for permission in permissions.split():
-                conn.execute(
-                    'INSERT INTO role_permissions (role, permission) VALUES (%s, %s) ON CONFLICT DO NOTHING',
-                    (role, permission),
-                )
+        conn.execute("DROP TABLE IF EXISTS role_permissions")
         conn.execute("ALTER TABLE onboarding_customers ADD COLUMN IF NOT EXISTS business_type TEXT NOT NULL DEFAULT 'Other'")
         conn.execute("ALTER TABLE onboarding_customers ADD COLUMN IF NOT EXISTS project_id UUID")
+        conn.execute("ALTER TABLE onboarding_customers ADD COLUMN IF NOT EXISTS guardrails JSONB NOT NULL DEFAULT '{}'::jsonb")
+        conn.execute("ALTER TABLE onboarding_projects ADD COLUMN IF NOT EXISTS guardrails JSONB NOT NULL DEFAULT '{}'::jsonb")
         conn.execute('ALTER TABLE onboarding_customers DROP COLUMN IF EXISTS trial_end_date')
         conn.execute('ALTER TABLE onboarding_customers DROP COLUMN IF EXISTS subscription_status')
         conn.execute('''CREATE TABLE IF NOT EXISTS onboarding_projects (
@@ -207,7 +212,16 @@ def initialize_database():
         conn.execute("ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS annual_price_minor INTEGER NOT NULL DEFAULT 0")
         conn.execute("ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS product TEXT NOT NULL DEFAULT ''")
         conn.execute("ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS popular BOOLEAN NOT NULL DEFAULT FALSE")
-        conn.execute("ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS trial_duration_days INTEGER NOT NULL DEFAULT 15")
+        conn.execute("""DO $$ BEGIN
+            IF EXISTS (SELECT 1 FROM information_schema.columns
+                      WHERE table_name = 'subscription_plans' AND column_name = 'trial_duration_days')
+               AND NOT EXISTS (SELECT 1 FROM information_schema.columns
+                      WHERE table_name = 'subscription_plans' AND column_name = 'plan_duration_days') THEN
+                ALTER TABLE subscription_plans RENAME COLUMN trial_duration_days TO plan_duration_days;
+            END IF;
+        END $$;""")
+        conn.execute("ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS plan_duration_days INTEGER NOT NULL DEFAULT 15")
+        conn.execute("ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS guardrails JSONB NOT NULL DEFAULT '{}'::jsonb")
         conn.execute('''CREATE TABLE IF NOT EXISTS subscriptions (
             id UUID PRIMARY KEY, customer_id UUID NOT NULL REFERENCES onboarding_customers(id) ON DELETE CASCADE,
             plan_id UUID NOT NULL REFERENCES subscription_plans(id), status TEXT NOT NULL,
@@ -270,8 +284,9 @@ def initialize_database():
         END $$''')
         conn.execute('''CREATE UNIQUE INDEX IF NOT EXISTS subscriptions_customer_plan_uq
             ON subscriptions(customer_id, plan_id)''')
-        conn.execute("DO $$ BEGIN IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'trial_signup_tokens') AND NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'subscription_signup_tokens') THEN ALTER TABLE trial_signup_tokens RENAME TO subscription_signup_tokens; END IF; END $$;")
-        conn.execute("CREATE TABLE IF NOT EXISTS subscription_signup_tokens (id UUID PRIMARY KEY, email TEXT NOT NULL, plan TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE, created_at TIMESTAMPTZ NOT NULL, expires_at TIMESTAMPTZ NOT NULL, consumed_at TIMESTAMPTZ)")
+        conn.execute("CREATE TABLE IF NOT EXISTS workspace_access_tokens (id UUID PRIMARY KEY, email TEXT NOT NULL, user_id TEXT NOT NULL, tenant_id TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE, created_at TIMESTAMPTZ NOT NULL, expires_at TIMESTAMPTZ NOT NULL, consumed_at TIMESTAMPTZ)")
+        # Migration: workspace links remain valid until expiry, regardless of prior use.
+        conn.execute("UPDATE workspace_access_tokens SET consumed_at = NULL WHERE expires_at > %s", (datetime.now(timezone.utc),))
         conn.execute('''CREATE TABLE IF NOT EXISTS admin_users (
             email TEXT PRIMARY KEY, password_hash TEXT NOT NULL,
             password_salt TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL)''')
@@ -352,9 +367,9 @@ def create_customer(customer: Customer, authorization: str | None = Header(defau
     now = datetime.now(timezone.utc)
     customer.created_at = customer.created_at or now
     customer.trial_start_date = customer.trial_start_date or (datetime.fromisoformat(TRIAL_START_DATE).replace(tzinfo=timezone.utc) if TRIAL_START_DATE else now)
-    duration_days = customer.trial_duration_days if customer.trial_duration_days is not None else TRIAL_DURATION_DAYS
+    duration_days = customer.plan_duration_days if customer.plan_duration_days is not None else PLAN_DURATION_DAYS
     if duration_days < 1:
-        raise HTTPException(422, 'trial_duration_days must be at least 1')
+        raise HTTPException(422, 'plan_duration_days must be at least 1')
     with closing(connection()) as conn:
         existing = conn.execute(
             'SELECT id FROM onboarding_customers WHERE user_id=%s',
@@ -378,12 +393,13 @@ def create_customer(customer: Customer, authorization: str | None = Header(defau
             (customer_id, customer.tenant_id, customer.user_id, customer.name,
              customer.email, customer.product, customer.business_type, customer.project_id,
              customer.role, customer.trial_start_date, customer.created_at))
-        plan = conn.execute('''SELECT id, trial_duration_days FROM subscription_plans
-            WHERE price_minor = 0 AND product = %s
-            ORDER BY name LIMIT 1''', (customer.product,)).fetchone()
+        plan = conn.execute('''SELECT id, name, plan_duration_days FROM subscription_plans
+            WHERE product = %s AND (%s::text IS NULL OR lower(name) = lower(%s::text))
+            ORDER BY (price_minor = 0) DESC, name LIMIT 1''',
+            (customer.product, customer.plan_name, customer.plan_name)).fetchone()
         if not plan:
-            raise HTTPException(409, f'No free subscription plan configured for product {customer.product}')
-        duration_days = plan['trial_duration_days']
+            raise HTTPException(409, f'Subscription plan {customer.plan_name!r} is not configured for product {customer.product}')
+        duration_days = plan['plan_duration_days']
         subscription_end = customer.trial_start_date + timedelta(days=duration_days)
         conn.execute('''INSERT INTO subscriptions
             (id, customer_id, plan_id, status, created_at, trial_end_at, period_end_at)
@@ -402,22 +418,18 @@ def get_authorization(user_id: str, authorization: str | None = Header(default=N
     with closing(connection()) as conn:
         row = conn.execute('''SELECT c.user_id, c.tenant_id, c.role,
             CASE WHEN s.status = 'expired' OR s.period_end_at < NOW()
-                 THEN 'EXPIRED' ELSE COALESCE(s.status, 'trialing') END AS status
+                 THEN 'EXPIRED' ELSE COALESCE(s.status, 'trialing') END AS status,
+            p.name AS plan_name, COALESCE(p.guardrails, '{}'::jsonb) AS guardrails
             FROM onboarding_customers c
             LEFT JOIN LATERAL (
-                SELECT status, period_end_at FROM subscriptions
+                SELECT status, period_end_at, plan_id FROM subscriptions
                 WHERE customer_id = c.id ORDER BY created_at DESC LIMIT 1
             ) s ON TRUE
+            LEFT JOIN subscription_plans p ON p.id = s.plan_id
             WHERE c.user_id = %s''', (user_id,)).fetchone()
     if not row:
         raise HTTPException(404, 'Authorization record not found')
-    with closing(connection()) as conn:
-        permissions = conn.execute(
-            'SELECT permission FROM role_permissions WHERE role=%s ORDER BY permission',
-            (row['role'],),
-        ).fetchall()
     result = dict(row)
-    result['permissions'] = [item['permission'] for item in permissions]
     return result
 
 @app.patch('/api/authorization/{user_id}/role')
@@ -457,6 +469,18 @@ def list_customers(user_id: str | None = None, authorization: str | None = Heade
         rows = conn.execute(customer_query('WHERE user_id=%s') if user_id else customer_query(), (user_id,) if user_id else ()).fetchall()
     return rows
 
+@app.get('/api/onboarding/customers/primary/{tenant_id}')
+def get_primary_customer(tenant_id: str, authorization: str | None = Header(default=None)):
+    require_service(authorization)
+    with closing(connection()) as conn:
+        customer = conn.execute(
+            "SELECT user_id FROM onboarding_customers WHERE tenant_id=%s AND business_type <> 'internal' ORDER BY created_at LIMIT 1",
+            (tenant_id,),
+        ).fetchone()
+    if not customer:
+        raise HTTPException(404, 'Primary customer not found')
+    return dict(customer)
+
 @app.get('/api/onboarding/customers/{customer_id}')
 def get_customer(customer_id: str, authorization: str | None = Header(default=None)):
     require_admin(authorization)
@@ -464,6 +488,45 @@ def get_customer(customer_id: str, authorization: str | None = Header(default=No
         customer = conn.execute(customer_query('WHERE id=%s'), (customer_id,)).fetchone()
     if not customer: raise HTTPException(404, 'Customer not found')
     return customer
+
+GUARDRAIL_FIELDS = {
+    'max_legal_entities', 'max_reconciliations', 'max_users_per_entity',
+    'max_invoices', 'max_bank_statements', 'max_purchase_orders', 'max_credit_notes',
+    'max_grns', 'max_erp_syncs', 'max_erp_writebacks', 'max_erp_connectors',
+    'max_ai_reads', 'max_ai_writes',
+}
+
+@app.patch('/api/onboarding/customers/{customer_id}/guardrails')
+def update_customer_guardrails(customer_id: str, payload: dict, authorization: str | None = Header(default=None)):
+    require_admin(authorization)
+    values = payload.get('guardrails', payload)
+    if not isinstance(values, dict) or values.get('scope', 'tenant') != 'tenant':
+        raise HTTPException(422, 'Guardrails are tenant-wide')
+    cleaned = {'scope': 'tenant'}
+    for key in GUARDRAIL_FIELDS:
+        value = values.get(key)
+        if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value < 0):
+            raise HTTPException(422, f'{key} must be a non-negative integer or null')
+        cleaned[key] = value
+    for key in ('alerts_enabled', 'notifications_enabled'):
+        value = values.get(key, True)
+        if not isinstance(value, bool):
+            raise HTTPException(422, f'{key} must be boolean')
+        cleaned[key] = value
+    limit_types = values.get('limit_types')
+    if not isinstance(limit_types, dict) or any(kind not in ('subscription', 'monthly') for kind in limit_types.values()):
+        raise HTTPException(422, 'limit_types must classify each guardrail as subscription or monthly')
+    cleaned['limit_types'] = limit_types
+    limit_types = values.get('limit_types')
+    if not isinstance(limit_types, dict) or any(kind not in ('subscription', 'monthly') for kind in limit_types.values()):
+        raise HTTPException(422, 'limit_types must classify each guardrail as subscription or monthly')
+    cleaned['limit_types'] = limit_types
+    with closing(connection()) as conn:
+        row = conn.execute('UPDATE onboarding_customers SET guardrails=%s WHERE id=%s RETURNING id, guardrails', (json.dumps(cleaned), customer_id)).fetchone()
+        if not row:
+            raise HTTPException(404, 'Customer not found')
+        conn.commit()
+    return dict(row)
 
 @app.patch('/api/onboarding/customers/{customer_id}/trial')
 def update_customer_trial(customer_id: str, update: TrialUpdate, authorization: str | None = Header(default=None)):
@@ -488,9 +551,14 @@ def delete_customer(customer_id: str, background_tasks: BackgroundTasks, authori
     with closing(connection()) as conn:
         customer = conn.execute('SELECT id, tenant_id, user_id, email FROM onboarding_customers WHERE id=%s', (customer_id,)).fetchone()
         if not customer: raise HTTPException(404, 'Customer not found')
+        notify_reconq('customer.deleted', dict(customer))
+        delete_keycloak_group(customer['tenant_id'], KEYCLOAK_REALM)
+        delete_keycloak_group(customer['tenant_id'], KEYCLOAK_RECONQ_REALM)
         delete_keycloak_user(customer['user_id'], customer['email'])
         delete_keycloak_user(customer['user_id'], customer['email'], KEYCLOAK_RECONQ_REALM)
-        notify_reconq('customer.deleted', dict(customer))
+        # Customer deletion is permanent; invalidate every reusable workspace
+        # link for this tenant immediately instead of waiting for expiry.
+        conn.execute('DELETE FROM workspace_access_tokens WHERE tenant_id=%s', (customer['tenant_id'],))
         conn.execute('DELETE FROM subscriptions WHERE customer_id=%s', (customer_id,))
         conn.execute('DELETE FROM onboarding_customers WHERE id=%s', (customer_id,))
         conn.commit()
@@ -503,51 +571,37 @@ def check_subscription_entitlement(customer_id: str, key: str, authorization: st
     return {'customer_id': result.customer_id, 'key': result.key, 'allowed': result.allowed}
 
 
-@app.post("/api/public/subscription-token")
-def create_subscription_token(req: SubscriptionTokenRequest):
+@app.post("/api/public/workspace-access-token")
+def create_workspace_access_token(req: WorkspaceAccessTokenRequest):
     raw_token = secrets.token_urlsafe(32)
     now = datetime.now(timezone.utc)
     with closing(connection()) as conn:
-        conn.execute("DELETE FROM subscription_signup_tokens WHERE expires_at <= %s", (now,))
-        conn.execute("INSERT INTO subscription_signup_tokens (id, email, plan, token_hash, created_at, expires_at) VALUES (%s, %s, %s, %s, %s, %s)", (str(uuid4()), str(req.email), req.plan, hashlib.sha256(raw_token.encode()).hexdigest(), now, now + timedelta(minutes=30)))
+        conn.execute("DELETE FROM workspace_access_tokens WHERE expires_at <= %s", (now,))
+        conn.execute("INSERT INTO workspace_access_tokens (id, email, user_id, tenant_id, token_hash, created_at, expires_at) VALUES (%s, %s, %s, %s, %s, %s, %s)", (str(uuid4()), str(req.email), req.user_id, req.tenant_id, hashlib.sha256(raw_token.encode()).hexdigest(), now, now + timedelta(hours=72)))
         conn.commit()
-    return {"token": raw_token, "expires_at": now + timedelta(minutes=30)}
+    return {"token": raw_token, "expires_at": now + timedelta(hours=72),
+            "login_url": f"{RECONQ_AUTH_URL}?workspace_token={raw_token}"}
 
 
-@app.post("/api/public/subscription-token/consume")
-def consume_subscription_token(req: SubscriptionTokenConsumeRequest):
-    token_hash = hashlib.sha256(req.token.encode()).hexdigest()
-    now = datetime.now(timezone.utc)
-    with closing(connection()) as conn:
-        conn.execute("DELETE FROM subscription_signup_tokens WHERE expires_at <= %s", (now,))
-        row = conn.execute("UPDATE subscription_signup_tokens SET consumed_at=%s WHERE token_hash=%s AND email=%s AND consumed_at IS NULL AND expires_at>%s RETURNING email, plan", (now, token_hash, str(req.email), now)).fetchone()
-        conn.commit()
-    if not row:
-        raise HTTPException(status_code=400, detail="This signup link is invalid or expired.")
-    return {"valid": True, "email": row["email"], "plan": row["plan"]}
-
-
-@app.get("/api/public/subscription-token/status")
-def subscription_token_status(token: str, email: EmailStr):
+@app.post("/api/public/workspace-access-token/consume")
+def consume_workspace_access_token(req: WorkspaceAccessTokenConsumeRequest | None = None, x_workspace_token: str | None = Header(default=None)):
+    token = (req.token if req else None) or x_workspace_token
+    if not token:
+        raise HTTPException(status_code=422, detail="Workspace token is required.")
     token_hash = hashlib.sha256(token.encode()).hexdigest()
     now = datetime.now(timezone.utc)
     with closing(connection()) as conn:
-        row = conn.execute("SELECT email, expires_at, consumed_at FROM subscription_signup_tokens WHERE token_hash=%s AND email=%s", (token_hash, str(email))).fetchone()
-        if not row:
-            raise HTTPException(status_code=404, detail="Signup link not found")
-        if row["expires_at"] <= now:
-            conn.execute("DELETE FROM subscription_signup_tokens WHERE token_hash=%s", (token_hash,))
-            conn.commit()
-            raise HTTPException(status_code=410, detail="This signup link has expired")
-        if row["consumed_at"]:
-            raise HTTPException(status_code=410, detail="This signup link has already been used")
-    return {"valid": True, "expires_at": row["expires_at"]}
+        conn.execute("DELETE FROM workspace_access_tokens WHERE expires_at <= %s", (now,))
+        row = conn.execute("SELECT email, user_id, tenant_id FROM workspace_access_tokens WHERE token_hash=%s AND expires_at>%s", (token_hash, now)).fetchone()
+    if not row:
+        raise HTTPException(status_code=400, detail="This workspace link is invalid or expired.")
+    return {"valid": True, "email": row["email"], "user_id": row["user_id"], "tenant_id": row["tenant_id"]}
 
 
 @app.get('/api/public/subscription-plans')
 def public_subscription_plans():
     with closing(connection()) as conn:
-        rows = conn.execute('''SELECT id, name, price_minor, annual_price_minor, currency, product, popular, trial_duration_days, description,
+        rows = conn.execute('''SELECT id, name, price_minor, annual_price_minor, currency, product, popular, plan_duration_days, description,
             array_to_string(entitlements, E'\n') AS features
             FROM subscription_plans WHERE product IS NOT NULL AND product <> '' ORDER BY price_minor, name''').fetchall()
     return [{**row, 'price': row.pop('price_minor') / 100, 'annual_price': row.pop('annual_price_minor') / 100} for row in rows]
@@ -557,10 +611,36 @@ def public_subscription_plans():
 def list_subscription_plans(authorization: str | None = Header(default=None)):
     require_admin(authorization)
     with closing(connection()) as conn:
-        rows = conn.execute('''SELECT id, name, price_minor, annual_price_minor, currency, product, popular, trial_duration_days, description,
-            array_to_string(entitlements, E'\n') AS features, product
+        rows = conn.execute('''SELECT id, name, price_minor, annual_price_minor, currency, product, popular, plan_duration_days, description,
+            array_to_string(entitlements, E'\n') AS features, product, guardrails
             FROM subscription_plans ORDER BY price_minor, name''').fetchall()
     return [{**row, 'price': row.pop('price_minor') / 100, 'annual_price': row.pop('annual_price_minor') / 100} for row in rows]
+
+@app.patch('/api/subscription-plans/{plan_id}/guardrails')
+def update_plan_guardrails(plan_id: str, payload: dict, authorization: str | None = Header(default=None)):
+    require_admin(authorization)
+    values = payload.get('guardrails', payload)
+    if not isinstance(values, dict):
+        raise HTTPException(422, 'Guardrails must be an object')
+    cleaned = {'scope': 'tenant'}
+    for key in GUARDRAIL_FIELDS:
+        value = values.get(key)
+        if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value < 0):
+            raise HTTPException(422, f'{key} must be a non-negative integer or null')
+        cleaned[key] = value
+    for key in ('alerts_enabled', 'notifications_enabled'):
+        value = values.get(key, True)
+        if not isinstance(value, bool):
+            raise HTTPException(422, f'{key} must be boolean')
+        cleaned[key] = value
+    with closing(connection()) as conn:
+        row = conn.execute('UPDATE subscription_plans SET guardrails=%s WHERE id=%s RETURNING id, name, product, guardrails', (json.dumps(cleaned), plan_id)).fetchone()
+        if not row:
+            raise HTTPException(404, 'Subscription plan not found')
+        conn.commit()
+    result = dict(row)
+    notify_reconq('subscription.plan.guardrails.updated', result)
+    return result
 
 @app.post('/api/projects/register')
 def register_project(project: ProjectRegistration, authorization: str | None = Header(default=None)):
@@ -582,7 +662,26 @@ def register_project(project: ProjectRegistration, authorization: str | None = H
 def list_projects(authorization: str | None = Header(default=None)):
     require_admin(authorization)
     with closing(connection()) as conn:
-        return conn.execute('SELECT id, key, name, created_at FROM onboarding_projects ORDER BY name').fetchall()
+        return conn.execute('SELECT id, key, name, created_at, guardrails FROM onboarding_projects ORDER BY name').fetchall()
+
+@app.patch('/api/projects/{project_key}/guardrails')
+def update_project_guardrails(project_key: str, payload: dict, authorization: str | None = Header(default=None)):
+    require_admin(authorization)
+    values = payload.get('guardrails', payload)
+    if not isinstance(values, dict) or values.get('scope', 'tenant') not in ('tenant', 'legal_entity'):
+        raise HTTPException(422, 'scope must be tenant or legal_entity')
+    cleaned = {'scope': values.get('scope', 'tenant')}
+    for key in GUARDRAIL_FIELDS:
+        value = values.get(key)
+        if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value < 0):
+            raise HTTPException(422, f'{key} must be a non-negative integer or null')
+        cleaned[key] = value
+    with closing(connection()) as conn:
+        row = conn.execute('UPDATE onboarding_projects SET guardrails=%s WHERE key=%s RETURNING key, guardrails', (json.dumps(cleaned), project_key)).fetchone()
+        if not row:
+            raise HTTPException(404, 'Project not found')
+        conn.commit()
+    return dict(row)
 
 
 @app.get('/api/subscription-products')
@@ -596,18 +695,18 @@ def list_subscription_products(authorization: str | None = Header(default=None))
 @app.post('/api/subscription-plans', status_code=201)
 def create_subscription_plan(plan: PlanInput, background_tasks: BackgroundTasks, authorization: str | None = Header(default=None)):
     require_admin(authorization)
-    if plan.trial_duration_days < 1:
-        raise HTTPException(422, "trial_duration_days must be at least 1")
+    if plan.plan_duration_days < 1:
+        raise HTTPException(422, "plan_duration_days must be at least 1")
     plan_id = str(uuid4())
     with closing(connection()) as conn:
         if plan.popular:
             conn.execute('UPDATE subscription_plans SET popular=FALSE WHERE product=%s', (plan.product.strip(),))
         row = conn.execute('''INSERT INTO subscription_plans
-            (id, name, price_minor, annual_price_minor, currency, entitlements, description, product, popular, trial_duration_days)
+            (id, name, price_minor, annual_price_minor, currency, entitlements, description, product, popular, plan_duration_days)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            RETURNING id, name, price_minor, annual_price_minor, currency, description, array_to_string(entitlements, E'\n') AS features, product, popular, trial_duration_days''',
+            RETURNING id, name, price_minor, annual_price_minor, currency, description, array_to_string(entitlements, E'\n') AS features, product, popular, plan_duration_days''',
             (plan_id, plan.name.strip(), round(plan.price * 100), round(plan.annual_price * 100), plan.currency.upper(),
-             [item.strip() for item in plan.features.splitlines() if item.strip()], plan.description.strip(), plan.product.strip(), plan.popular, plan.trial_duration_days)).fetchone()
+             [item.strip() for item in plan.features.splitlines() if item.strip()], plan.description.strip(), plan.product.strip(), plan.popular, plan.plan_duration_days)).fetchone()
         conn.commit()
     result = {**row, 'price': row.pop('price_minor') / 100, 'annual_price': row.pop('annual_price_minor') / 100}
     background_tasks.add_task(notify_reconq, 'subscription.plan.created', result)
@@ -615,19 +714,19 @@ def create_subscription_plan(plan: PlanInput, background_tasks: BackgroundTasks,
 
 @app.put('/api/subscription-plans/{plan_id}')
 def update_subscription_plan(plan_id: str, plan: PlanInput, background_tasks: BackgroundTasks, authorization: str | None = Header(default=None)):
-    if plan.trial_duration_days < 1:
-        raise HTTPException(422, "trial_duration_days must be at least 1")
+    if plan.plan_duration_days < 1:
+        raise HTTPException(422, "plan_duration_days must be at least 1")
     require_admin(authorization)
     with closing(connection()) as conn:
         if plan.popular:
             conn.execute('UPDATE subscription_plans SET popular=FALSE WHERE product=%s AND id<>%s', (plan.product.strip(), plan_id))
         row = conn.execute('''UPDATE subscription_plans SET name=%s, price_minor=%s,
-            annual_price_minor=%s, currency=%s, entitlements=%s, description=%s, product=%s, popular=%s, trial_duration_days=%s WHERE id=%s
+            annual_price_minor=%s, currency=%s, entitlements=%s, description=%s, product=%s, popular=%s, plan_duration_days=%s WHERE id=%s
             RETURNING id, name, price_minor, annual_price_minor, currency, description,
-            array_to_string(entitlements, E'\n') AS features, product, popular, trial_duration_days''',
+            array_to_string(entitlements, E'\n') AS features, product, popular, plan_duration_days''',
             (plan.name.strip(), round(plan.price * 100), round(plan.annual_price * 100), plan.currency.upper(),
              [item.strip() for item in plan.features.splitlines() if item.strip()],
-             plan.description.strip(), plan.product.strip(), plan.popular, plan.trial_duration_days, plan_id)).fetchone()
+             plan.description.strip(), plan.product.strip(), plan.popular, plan.plan_duration_days, plan_id)).fetchone()
         if not row: raise HTTPException(404, 'Subscription plan not found')
         conn.commit()
     result = {**row, 'price': row.pop('price_minor') / 100, 'annual_price': row.pop('annual_price_minor') / 100}

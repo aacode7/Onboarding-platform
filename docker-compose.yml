@@ -1,6 +1,9 @@
 services:
   keycloak:
-    image: quay.io/keycloak/keycloak:26.8.0
+    build:
+      context: ./keycloak
+      dockerfile: Dockerfile
+      network: host
     command: start --import-realm
     network_mode: host
     env_file:
@@ -12,6 +15,8 @@ services:
       KC_HOSTNAME: 127.0.0.1
       KC_HTTP_ENABLED: "true"
       KC_HEALTH_ENABLED: "true"
+      ONBOARDING_PUBLIC_URL: http://127.0.0.1:8001
+      RECONQ_AUTH_URL: http://localhost:3000/workspace-access
     volumes:
       - ./keycloak/realm-reconq.json:/opt/keycloak/data/import/reconq.json:ro
       - ./keycloak/realm-reconq-app.json:/opt/keycloak/data/import/reconq-app.json:ro
@@ -19,6 +24,7 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
+      network: host
       ssh:
         - default
     env_file:
@@ -32,6 +38,7 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
+      network: host
       ssh:
         - default
     env_file:

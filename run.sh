@@ -48,6 +48,28 @@ if ! curl --silent --fail http://127.0.0.1:8080/ >/dev/null; then
   exit 1
 fi
 
+echo "Configuring the ReconQ workspace browser flow..."
+docker compose exec -T keycloak /opt/keycloak/bin/kcadm.sh config credentials \
+  --server http://127.0.0.1:8080 \
+  --realm master \
+  --user "$KEYCLOAK_ADMIN_USERNAME" \
+  --password "$KEYCLOAK_ADMIN_PASSWORD" >/dev/null
+if ! docker compose exec -T keycloak /opt/keycloak/bin/kcadm.sh get authentication/flows -r reconq --fields alias 2>/dev/null | grep -q 'workspace-browser'; then
+  docker compose exec -T keycloak /opt/keycloak/bin/kcadm.sh create authentication/flows -r reconq \
+    -s alias=workspace-browser -s providerId=basic-flow -s topLevel=true -s builtIn=false >/dev/null
+fi
+workspace_executions=$(docker compose exec -T keycloak /opt/keycloak/bin/kcadm.sh get authentication/flows/workspace-browser/executions -r reconq 2>/dev/null || printf '[]')
+workspace_execution_id=$(printf '%s' "$workspace_executions" | python3 -c 'import json,sys; data=json.load(sys.stdin); print(next((x["id"] for x in data if x.get("providerId")=="workspace-token"), ""))')
+if [[ -z "$workspace_execution_id" ]]; then
+  workspace_execution_id=$(docker compose exec -T keycloak /opt/keycloak/bin/kcadm.sh create authentication/flows/workspace-browser/executions/execution -r reconq \
+    -s provider=workspace-token -i | tr -d '\r\n')
+fi
+docker compose exec -T keycloak /opt/keycloak/bin/kcadm.sh update authentication/flows/workspace-browser/executions -r reconq \
+  --body "{\"id\":\"$workspace_execution_id\",\"requirement\":\"ALTERNATIVE\"}" >/dev/null
+docker compose exec -T keycloak /opt/keycloak/bin/kcadm.sh update realms/reconq \
+  -s browserFlow=workspace-browser >/dev/null
+echo "✓ ReconQ workspace browser flow is active."
+
 echo "Waiting for the subscription scheduler..."
 for _ in {1..30}; do
   if docker compose logs --no-color --tail=100 subscription-worker 2>/dev/null | grep -q "Subscription scheduler started"; then
