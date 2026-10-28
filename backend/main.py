@@ -45,7 +45,6 @@ KEYCLOAK_RECONQ_REALM = os.getenv('KEYCLOAK_RECONQ_REALM', 'reconq')
 RECONQ_AUTH_URL = os.getenv('RECONQ_AUTH_URL', 'http://localhost:3000/login')
 KEYCLOAK_ISSUER = f'{KEYCLOAK_URL.rstrip("/")}/realms/{KEYCLOAK_REALM}'
 KEYCLOAK_JWKS = jwt.PyJWKClient(f'{KEYCLOAK_ISSUER}/protocol/openid-connect/certs')
-FREE_TRIAL_PLAN_ID = '2f1c0d5e-5b6e-4c38-9f76-8a7e5d2b1c40'
 PLAN_DURATION_DAYS = int(os.environ['PLAN_DURATION_DAYS'])
 TRIAL_START_DATE = os.getenv('ONBOARDING_TRIAL_START_DATE', '').strip()
 
@@ -143,7 +142,7 @@ class Customer(BaseModel):
     business_type: str = 'Other'
     project_id: str | None = None
     subscription_status: str = 'TRIAL'
-    plan_name: str | None = None
+    plan_name: str
     trial_start_date: datetime | None = None
     plan_duration_days: int | None = None
     created_at: datetime | None = None
@@ -250,26 +249,8 @@ def initialize_database():
             ON onboarding_customers(lower(email))''')
         conn.execute("ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS product TEXT NOT NULL DEFAULT ''")
         conn.execute('ALTER TABLE subscriptions DROP CONSTRAINT IF EXISTS subscriptions_plan_fk')
-        conn.execute('''DO $$ BEGIN
-            IF EXISTS (SELECT 1 FROM information_schema.columns
-                       WHERE table_name = 'subscription_plans'
-                         AND column_name = 'id' AND data_type = 'text') THEN
-                ALTER TABLE subscription_plans ALTER COLUMN id TYPE UUID USING CASE
-                    WHEN id = 'onboarding-free-trial' THEN '%s'::uuid
-                    ELSE id::uuid END;
-            END IF;
-        END $$''' % FREE_TRIAL_PLAN_ID)
         conn.execute('''ALTER TABLE subscriptions
             ALTER COLUMN customer_id TYPE UUID USING customer_id::uuid''')
-        conn.execute('''DO $$ BEGIN
-            IF EXISTS (SELECT 1 FROM information_schema.columns
-                       WHERE table_name = 'subscriptions'
-                         AND column_name = 'plan_id' AND data_type = 'text') THEN
-                ALTER TABLE subscriptions ALTER COLUMN plan_id TYPE UUID USING CASE
-                    WHEN plan_id = 'onboarding-free-trial' THEN '%s'::uuid
-                    ELSE plan_id::uuid END;
-            END IF;
-        END $$''' % FREE_TRIAL_PLAN_ID)
         conn.execute('''DO $$ BEGIN
             ALTER TABLE subscriptions
             ADD CONSTRAINT subscriptions_customer_fk
@@ -394,9 +375,9 @@ def create_customer(customer: Customer, authorization: str | None = Header(defau
              customer.email, customer.product, customer.business_type, customer.project_id,
              customer.role, customer.trial_start_date, customer.created_at))
         plan = conn.execute('''SELECT id, name, plan_duration_days FROM subscription_plans
-            WHERE product = %s AND (%s::text IS NULL OR lower(name) = lower(%s::text))
-            ORDER BY (price_minor = 0) DESC, name LIMIT 1''',
-            (customer.product, customer.plan_name, customer.plan_name)).fetchone()
+            WHERE product = %s AND lower(name) = lower(%s::text)
+            LIMIT 1''',
+            (customer.product, customer.plan_name)).fetchone()
         if not plan:
             raise HTTPException(409, f'Subscription plan {customer.plan_name!r} is not configured for product {customer.product}')
         duration_days = plan['plan_duration_days']

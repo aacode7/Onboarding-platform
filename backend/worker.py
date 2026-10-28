@@ -36,6 +36,13 @@ def notify_subscription(event: str, customer: dict, subscription: dict, plan: di
 
 def process_cycle(scheduler, store, notified: set[str], synced: dict[str, str]) -> None:
     now = datetime.now(timezone.utc)
+    with connection() as conn:
+        deleted_tokens = conn.execute(
+            'DELETE FROM workspace_access_tokens WHERE expires_at <= %s',
+            (now,),
+        ).rowcount
+        if deleted_tokens:
+            logger.info('Removed %s expired workspace access token(s)', deleted_tokens)
     due = store.list_due_subscriptions(now)
     scheduler.service.process_due_subscriptions()
     with connection() as conn:

@@ -1,25 +1,4 @@
 services:
-  keycloak:
-    build:
-      context: ./keycloak
-      dockerfile: Dockerfile
-      network: host
-    command: start --import-realm
-    network_mode: host
-    env_file:
-      - ./backend/.env
-    environment:
-      KC_DB: postgres
-      KC_DB_URL: jdbc:postgresql://127.0.0.1:5432/keycloak_db
-      KC_DB_USERNAME: keycloak
-      KC_HOSTNAME: 127.0.0.1
-      KC_HTTP_ENABLED: "true"
-      KC_HEALTH_ENABLED: "true"
-      ONBOARDING_PUBLIC_URL: http://127.0.0.1:8001
-      RECONQ_AUTH_URL: http://localhost:3000/workspace-access
-    volumes:
-      - ./keycloak/realm-reconq.json:/opt/keycloak/data/import/reconq.json:ro
-      - ./keycloak/realm-reconq-app.json:/opt/keycloak/data/import/reconq-app.json:ro
   backend:
     build:
       context: .
@@ -29,8 +8,6 @@ services:
         - default
     env_file:
       - ./backend/.env
-    environment:
-      KEYCLOAK_URL: http://127.0.0.1:8080
     network_mode: host
     restart: on-failure
 
@@ -43,8 +20,6 @@ services:
         - default
     env_file:
       - ./backend/.env
-    environment:
-      KEYCLOAK_URL: http://127.0.0.1:8080
     network_mode: host
     restart: on-failure
     command: ["/venv/bin/python", "-m", "backend.worker"]

@@ -66,9 +66,9 @@ function Details({ c, onDeleted }: { c: Customer; onDeleted: (id: string) => voi
           <Info label="Created At" value={date(c.created_at)} />
         </div>
         <div className="card">
-          <h2>Trial Information</h2>
-          <Info label="Trial Status" value={c.status || c.subscription_status || 'TRIAL'} />
-          <Info label="Trial Start Date" value={date(c.trial_start_date)} />
+          <h2>Subscription Information</h2>
+          <Info label="Subscription Status" value={c.status || c.subscription_status || 'TRIAL'} />
+          <Info label="Subscription Start Date" value={date(c.trial_start_date)} />
           {editingTrial ? <div className="trial-editor"><div><span className="trial-editor-label">Subscription End Date</span><small>Choose when this customer's subscription should end.</small></div><div className="trial-editor-controls"><div className="trial-date-picker"><input className="trial-date-input" type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={trialEnd} onChange={(event) => setTrialEnd(event.target.value)} /><button className="calendar-button" type="button" aria-label="Choose trial end date" onClick={() => { const picker = calendarRef.current; if (picker && 'showPicker' in picker) picker.showPicker(); else picker?.click(); }}><CalendarDays size={17} strokeWidth={2} /></button><input ref={calendarRef} className="hidden-date-picker" type="date" value={isoDate(trialEnd)} onChange={(event) => setTrialEnd(dateInput(`${event.target.value}T23:59:59+05:30`))} /></div><button className="trial-save-button" type="button" onClick={updateTrial}>Save changes</button><button className="trial-cancel-button" type="button" onClick={() => setEditingTrial(false)}>Cancel</button></div>{trialError && <small className="error">{trialError}</small>}</div> : <Info label="Subscription End Date" value={date(c.subscription_end_at)} />}
           {!editingTrial && <button type="button" className="link-button" onClick={() => setEditingTrial(true)}>Change trial end date</button>}
           <Info label="Days Remaining" value={String(left(c.subscription_end_at))} />
