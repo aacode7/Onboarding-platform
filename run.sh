@@ -28,10 +28,8 @@ if ! docker compose version >/dev/null 2>&1; then
 fi
 
 echo "Starting the Onboarding Platform..."
-# Clear stale containers/network references before Compose recreates the stack.
-docker compose down --remove-orphans >/dev/null 2>&1 || true
-docker compose build --no-cache
-docker compose up --force-recreate --remove-orphans -d
+# Rebuild changed code, reuse dependency layers, and recreate containers.
+docker compose up --build --force-recreate --remove-orphans -d
 
 echo "Using external Keycloak at ${KEYCLOAK_URL}"
 
